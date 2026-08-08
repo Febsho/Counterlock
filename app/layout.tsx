@@ -13,18 +13,18 @@ export async function generateMetadata(): Promise<Metadata> {
   const socialImage = `${protocol}://${host}/og.png`;
 
   return {
-    title: "Counterbuild — Deadlock Item-Empfehlungen",
-    description: "Datenbasierte Deadlock Item-Empfehlungen für deinen Helden, das Gegnerteam und den aktuellen Carry.",
+    title: "Counterbuild — Deadlock Item Recommendations",
+    description: "Data-driven Deadlock item recommendations for your hero, the enemy team, and their carry.",
     openGraph: {
-      title: "Counterbuild — Deadlock Item-Empfehlungen",
-      description: "Items, die dein Matchup drehen – gerankt mit echten Deadlock-Matchdaten.",
+      title: "Counterbuild — Deadlock Item Recommendations",
+      description: "Items that turn your matchup—ranked with real Deadlock match data.",
       type: "website",
-      images: [{ url: socialImage, width: 1200, height: 630, alt: "Counterbuild – Items, die dein Matchup drehen" }],
+      images: [{ url: socialImage, width: 1200, height: 630, alt: "Counterbuild — items that turn your matchup" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "Counterbuild — Deadlock Item-Empfehlungen",
-      description: "Items, die dein Matchup drehen – gerankt mit echten Deadlock-Matchdaten.",
+      title: "Counterbuild — Deadlock Item Recommendations",
+      description: "Items that turn your matchup—ranked with real Deadlock match data.",
       images: [socialImage],
     },
   };
@@ -32,7 +32,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="de">
+    <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body>
     </html>
   );
