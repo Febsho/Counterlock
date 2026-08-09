@@ -67,6 +67,14 @@ h1 em { color: var(--red); font-style: italic; font-weight: 950; }
 .select-card, .carry-card { display: flex; align-items: center; gap: 14px; padding: 12px; border: 1px solid #aaa398; background: #f6f2e8; }
 .select-card { cursor: pointer; }
 .select-card > span:last-child { flex: 1; min-width: 0; }
+.selected-hero-button { position: relative; display: grid; grid-template-columns: 66px minmax(0, 1fr) 24px; align-items: center; gap: 14px; width: 100%; padding: 8px; overflow: hidden; border: 2px solid var(--ink); background: #f6f2e8; color: var(--ink); text-align: left; box-shadow: 4px 4px 0 var(--ink); cursor: pointer; transition: transform .15s, box-shadow .15s; }
+.selected-hero-button::before { content: ""; position: absolute; inset: 0 0 0 auto; width: 35%; background: linear-gradient(110deg, transparent, #d9ff4366); pointer-events: none; }
+.selected-hero-button:hover { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
+.selected-hero-button .portrait { width: 66px; height: 72px; clip-path: polygon(0 0, 100% 0, 88% 100%, 0 100%); }
+.selected-hero-button > span:nth-child(2) { position: relative; min-width: 0; }
+.selected-hero-button strong { display: block; overflow: hidden; margin-bottom: 7px; text-transform: uppercase; font-size: 20px; letter-spacing: -.04em; text-overflow: ellipsis; white-space: nowrap; }
+.selected-hero-button i { display: inline-block; padding: 4px 6px; background: var(--acid); font: 900 7px/1 monospace; font-style: normal; letter-spacing: .08em; }
+.selected-hero-button > b { position: relative; font-size: 20px; }
 small { display: block; margin-bottom: 5px; font: 700 8px/1 monospace; letter-spacing: .13em; color: #747067; }
 select { width: 100%; border: 0; background: transparent; color: var(--ink); font-weight: 900; font-size: 17px; cursor: pointer; }
 .portrait { flex: 0 0 auto; display: grid; place-items: center; width: 58px; height: 58px; overflow: hidden; background: var(--ink); color: var(--paper); font-weight: 900; }
@@ -235,6 +243,29 @@ footer a { color: inherit; }
 .import-actions > button { border: 2px solid var(--ink); background: var(--acid); color: var(--ink); box-shadow: 4px 4px 0 var(--red); }
 .import-actions > button:disabled { opacity: .4; cursor: not-allowed; }
 
+.hero-picker-modal { width: min(1120px, 100%); padding: 0; overflow: hidden; }
+.hero-picker-head { display: grid; grid-template-columns: 1fr minmax(260px, 360px); align-items: end; gap: 30px; padding: 34px 38px 26px; border-bottom: 1px solid #4d4b47; background: radial-gradient(circle at 78% 0, #d9ff431c, transparent 34%), var(--ink); }
+.hero-picker-head h2 { font-size: clamp(36px, 5vw, 64px); }
+.hero-picker-head p { margin: 10px 0 0; color: #77736b; font: 800 9px/1 monospace; letter-spacing: .08em; }
+.hero-search { display: flex; align-items: center; gap: 10px; padding: 0 14px; border: 1px solid #66625b; background: #242320; }
+.hero-search:focus-within { border-color: var(--acid); }
+.hero-search > span { color: var(--acid); font-size: 22px; }
+.hero-search input { width: 100%; height: 48px; border: 0; outline: 0; background: transparent; color: var(--paper); font: 800 12px/1 monospace; }
+.hero-search input::placeholder { color: #77736b; }
+.hero-roster-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); max-height: min(620px, calc(100vh - 230px)); overflow-y: auto; padding: 14px; gap: 8px; background: #11110f; }
+.hero-roster-grid > button { position: relative; min-width: 0; padding: 0; overflow: hidden; border: 1px solid #3f3d39; background: #22211f; color: var(--paper); text-align: left; cursor: pointer; transition: border-color .15s, transform .15s; }
+.hero-roster-grid > button:hover:not(:disabled) { z-index: 1; border-color: var(--acid); transform: translateY(-3px); }
+.hero-roster-grid > button.selected { border: 2px solid var(--acid); background: #d9ff4314; }
+.hero-roster-grid > button.enemy { opacity: .38; filter: grayscale(.8); cursor: not-allowed; }
+.hero-card-art { display: block; aspect-ratio: 1 / 1.12; overflow: hidden; background: #2c2b28; }
+.hero-card-art > img { width: 100%; height: 100%; object-fit: cover; object-position: center 18%; transition: transform .22s; }
+.hero-roster-grid > button:hover:not(:disabled) .hero-card-art > img { transform: scale(1.045); }
+.hero-card-name { display: block; padding: 10px 9px 11px; }
+.hero-card-name strong { display: block; overflow: hidden; text-transform: uppercase; font-size: 11px; line-height: 1.1; text-overflow: ellipsis; white-space: nowrap; }
+.hero-card-name small { margin: 5px 0 0; color: #77736b; }
+.hero-roster-grid > button.selected .hero-card-name small { color: var(--acid); }
+.hero-roster-grid > button > i { position: absolute; top: 7px; right: 7px; display: grid; place-items: center; width: 22px; height: 22px; background: var(--acid); color: var(--ink); font-style: normal; font-weight: 900; }
+
 @media (max-width: 1050px) {
   .analyzer { grid-template-columns: 1fr 1fr; }
   .carry-block { grid-column: 1 / -1; border-top: 2px solid var(--ink); }
@@ -284,4 +315,12 @@ footer a { color: inherit; }
   .scan-results { min-height: 220px; }
   .ocr-progress { min-height: 190px; }
   .import-actions { align-items: stretch; flex-direction: column; }
+  .hero-picker-modal { min-height: 100vh; }
+  .hero-picker-head { grid-template-columns: 1fr; padding: 26px 22px 18px; }
+  .hero-search { margin-right: 44px; }
+  .hero-roster-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: calc(100vh - 210px); padding: 8px; }
+}
+
+@media (min-width: 701px) and (max-width: 1050px) {
+  .hero-roster-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }

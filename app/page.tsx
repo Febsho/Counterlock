@@ -10,7 +10,7 @@ type SortMode = "recommended" | "winrate" | "sample" | "cost";
 type Phase = "early" | "mid" | "late";
 type QueueMode = "all" | "ranked" | "unranked";
 
-type Hero = { id: number; name: string; images?: { icon_image_small_webp?: string } };
+type Hero = { id: number; name: string; images?: { icon_image_small_webp?: string; icon_hero_card_webp?: string } };
 type Item = {
   id: number;
   name: string;
@@ -31,7 +31,7 @@ const copy = {
     home: "Counterbuild home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE",
     heroTitleA: "Build for the fight", heroTitleB: "happening right now.",
     heroText: "Choose your hero, mark the enemy carry, and get item recommendations ranked with real matchup data.",
-    yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero",
+    yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero", changeHero: "CHANGE HERO", searchHero: "Search heroes…", heroRoster: "HERO ROSTER", heroesAvailable: "heroes available", selectedHero: "SELECTED", enemyPick: "ENEMY PICK", closeHeroPicker: "Close hero picker",
     enemyTeam: "ENEMY TEAM", chooseEnemy: "Choose an enemy", addEnemy: "+ Add enemy", remove: "Remove", importScreen: "IMPORT SCREENSHOT",
     focusTarget: "FOCUS TARGET", enemyCarry: "ENEMY CARRY", matchupWr: "YOUR MATCHUP WR",
     analyze: "ANALYZE MATCHUP →", analyzing: "ANALYZING …",
@@ -56,7 +56,7 @@ const copy = {
     home: "Counterbuild Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE",
     heroTitleA: "Baue für den Kampf,", heroTitleB: "der gerade passiert.",
     heroText: "Wähle deinen Helden, markiere den gegnerischen Carry und erhalte Item-Empfehlungen aus echten Matchup-Daten.",
-    yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Deinen Helden auswählen",
+    yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Helden auswählen", changeHero: "HELD WECHSELN", searchHero: "Helden suchen…", heroRoster: "HELDEN-ROSTER", heroesAvailable: "Helden verfügbar", selectedHero: "AUSGEWÄHLT", enemyPick: "GEGNER-PICK", closeHeroPicker: "Heldenauswahl schließen",
     enemyTeam: "GEGNERISCHES TEAM", chooseEnemy: "Gegner auswählen", addEnemy: "+ Gegner", remove: "Entfernen", importScreen: "SCREENSHOT IMPORTIEREN",
     focusTarget: "FOKUS-ZIEL", enemyCarry: "GEGNERISCHER CARRY", matchupWr: "DEINE MATCHUP-WR",
     analyze: "MATCHUP ANALYSIEREN →", analyzing: "ANALYSE LÄUFT …",
@@ -126,6 +126,8 @@ export default function Home() {
   const [heroes, setHeroes] = useState<Hero[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [heroId, setHeroId] = useState(1);
+  const [heroPickerOpen, setHeroPickerOpen] = useState(false);
+  const [heroSearch, setHeroSearch] = useState("");
   const [enemyIds, setEnemyIds] = useState<number[]>([13, 3, 6]);
   const [carryId, setCarryId] = useState(13);
   const [enemyToAdd, setEnemyToAdd] = useState(2);
@@ -252,6 +254,11 @@ export default function Home() {
     }).filter((entry): entry is CounterPick => Boolean(entry)).sort((a, b) => b.score - a.score).slice(0, 4);
   }, [allCounterStats, carryId, enemyIds, heroes]);
 
+  const filteredHeroes = useMemo(() => {
+    const query = heroSearch.trim().toLocaleLowerCase(lang);
+    return query ? heroes.filter((hero) => hero.name.toLocaleLowerCase(lang).includes(query)) : heroes;
+  }, [heroSearch, heroes, lang]);
+
   function addEnemy() { if (enemyToAdd !== heroId && !enemyIds.includes(enemyToAdd) && enemyIds.length < 6) setEnemyIds((current) => [...current, enemyToAdd]); }
   function removeEnemy(id: number) { const next = enemyIds.filter((enemyId) => enemyId !== id); setEnemyIds(next); if (carryId === id && next.length) setCarryId(next[0]); }
   function submit(event: FormEvent) { event.preventDefault(); void analyze(); }
@@ -284,8 +291,15 @@ export default function Home() {
     const url = `${window.location.origin}${window.location.pathname}?${params}`;
     try { await navigator.clipboard.writeText(url); window.history.replaceState(null, "", url); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 2200); } catch { setLinkCopied(false); }
   }
-  function selectCounterPick(id: number) {
+  function chooseOwnHero(id: number) {
+    const nextEnemies = enemyIds.filter((enemyId) => enemyId !== id);
     setHeroId(id);
+    if (nextEnemies.length !== enemyIds.length) setEnemyIds(nextEnemies);
+    if (carryId === id && nextEnemies.length) setCarryId(nextEnemies[0]);
+    setHeroPickerOpen(false); setHeroSearch("");
+  }
+  function selectCounterPick(id: number) {
+    chooseOwnHero(id);
     document.getElementById("top")?.scrollIntoView({ behavior: "smooth" });
   }
 
@@ -314,7 +328,7 @@ export default function Home() {
       <form className="analyzer" onSubmit={submit}>
         <div className="step-block">
           <div className="step-label"><span>01</span> {t.yourHero}</div>
-          <label className="select-card"><HeroPortrait hero={ownHero} /><span><small>{t.youPlay}</small><select value={heroId} onChange={(event) => setHeroId(Number(event.target.value))} aria-label={t.chooseHero}>{heroes.map((hero) => <option key={hero.id} value={hero.id}>{hero.name}</option>)}</select></span></label>
+          <button className="selected-hero-button" type="button" onClick={() => setHeroPickerOpen(true)} aria-haspopup="dialog"><HeroPortrait hero={ownHero} /><span><small>{t.youPlay}</small><strong>{ownHero?.name ?? "—"}</strong><i>{t.changeHero}</i></span><b>⌄</b></button>
         </div>
         <div className="step-block enemy-block">
           <div className="step-label"><span>02</span> {t.enemyTeam} <b>{enemyIds.length}/6</b></div>
@@ -367,6 +381,18 @@ export default function Home() {
       </section>
 
       <footer><div className="brand"><span className="brand-mark">CB</span><span><strong>COUNTER</strong>BUILD</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a> {t.disclaimer}</p></footer>
+
+      {heroPickerOpen && <div className="import-overlay hero-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="hero-picker-title">
+        <div className="import-modal hero-picker-modal">
+          <button className="modal-close" type="button" onClick={() => { setHeroPickerOpen(false); setHeroSearch(""); }} aria-label={t.closeHeroPicker}>×</button>
+          <div className="hero-picker-head"><div><div className="eyebrow">{t.heroRoster} · {heroes.length}</div><h2 id="hero-picker-title">{t.chooseHero}</h2><p>{heroes.length} {t.heroesAvailable}</p></div><label className="hero-search"><span>⌕</span><input autoFocus value={heroSearch} onChange={(event) => setHeroSearch(event.target.value)} placeholder={t.searchHero} /></label></div>
+          <div className="hero-roster-grid">{filteredHeroes.map((hero) => { const selected = hero.id === heroId; const enemy = enemyIds.includes(hero.id); return <button className={`${selected ? "selected" : ""} ${enemy ? "enemy" : ""}`} type="button" key={hero.id} onClick={() => chooseOwnHero(hero.id)} disabled={enemy}>
+            <span className="hero-card-art">{hero.images?.icon_hero_card_webp ? <img src={hero.images.icon_hero_card_webp} alt="" /> : <HeroPortrait hero={hero} />}</span>
+            <span className="hero-card-name"><strong>{hero.name}</strong><small>{selected ? t.selectedHero : enemy ? t.enemyPick : `#${String(hero.id).padStart(2, "0")}`}</small></span>
+            {selected && <i>✓</i>}
+          </button>; })}</div>
+        </div>
+      </div>}
 
       {importerOpen && <div className="import-overlay" role="dialog" aria-modal="true" aria-labelledby="import-title">
         <div className="import-modal">
