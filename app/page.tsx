@@ -29,7 +29,7 @@ type ItemStat = { item_id: number; wins: number; losses: number; matches: number
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
 type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[] };
-type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all"> };
+type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all">; isOwn?: boolean };
 type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
 type CounterPick = { hero: Hero; score: number; carryRate: number; matches: number; coverage: number };
 
@@ -61,6 +61,7 @@ const copy = {
     importerTitle: "Import enemy team", importerText: "Upload a match screenshot where the enemy hero names are visible. Recognition runs locally on your device.",
     allyImporterText: "Upload a scoreboard screenshot and select the heroes on your side. Recognition runs locally on your device.",
     autoImporterTitle: "Paste full scoreboard", autoImporterText: "Press Ctrl+V with a scoreboard screenshot. Both teams and Yellow, Blue, and Green lanes are assigned automatically.", pasteHint: "PRESS CTRL+V TO PASTE A SCREENSHOT", autoImport: "IMPORT BOTH TEAMS + LANES",
+    matchImport: "IMPORT CURRENT MATCH", matchImportText: "Paste with Ctrl+V or upload one scoreboard screenshot—your hero, allies, enemies, and lanes are detected together.",
     dropTitle: "Drop match screenshot here", dropText: "or click to choose a PNG, JPG, or WebP", scanning: "READING HERO NAMES", detected: "DETECTED HEROES", confidence: "match",
     importHeroes: "IMPORT SELECTED HEROES", scanAgain: "CHOOSE ANOTHER SCREENSHOT", noHeroes: "No hero names were detected. Try a sharper screenshot with the scoreboard fully visible.", close: "Close screenshot importer", localOnly: "PRIVATE · IMAGE NEVER LEAVES YOUR DEVICE",
     moreOptions: "MORE OPTIONS", apiFilters: "MATCH DATA", queue: "QUEUE", both: "Ranked + Unranked", ranked: "Ranked only", unranked: "Unranked only", dataWindow: "DATA WINDOW", days: "days", laneOnly: "SAME LANE ONLY",
@@ -94,6 +95,7 @@ const copy = {
     importerTitle: "Gegnerteam importieren", importerText: "Lade einen Match-Screenshot hoch, auf dem die gegnerischen Heldennamen sichtbar sind. Die Erkennung läuft lokal auf deinem Gerät.",
     allyImporterText: "Lade einen Scoreboard-Screenshot hoch und wähle die Helden auf deiner Seite. Die Erkennung läuft lokal auf deinem Gerät.",
     autoImporterTitle: "Gesamtes Scoreboard einfügen", autoImporterText: "Drücke Strg+V mit einem Scoreboard-Screenshot. Beide Teams sowie gelbe, blaue und grüne Lane werden automatisch zugeordnet.", pasteHint: "STRG+V DRÜCKEN, UM EINEN SCREENSHOT EINFÜGEN", autoImport: "BEIDE TEAMS + LANES IMPORTIEREN",
+    matchImport: "AKTUELLES MATCH IMPORTIEREN", matchImportText: "Mit Strg+V einfügen oder einen Scoreboard-Screenshot hochladen—dein Held, Teams und Lanes werden gemeinsam erkannt.",
     dropTitle: "Match-Screenshot hier ablegen", dropText: "oder klicken, um PNG, JPG oder WebP auszuwählen", scanning: "HELDENNAMEN WERDEN GELESEN", detected: "ERKANNTE HELDEN", confidence: "Treffer",
     importHeroes: "AUSGEWÄHLTE HELDEN IMPORTIEREN", scanAgain: "ANDEREN SCREENSHOT WÄHLEN", noHeroes: "Keine Heldennamen erkannt. Versuche einen schärferen Screenshot mit vollständig sichtbarem Scoreboard.", close: "Screenshot-Import schließen", localOnly: "PRIVAT · DAS BILD BLEIBT AUF DEINEM GERÄT",
     moreOptions: "MEHR OPTIONEN", apiFilters: "MATCH-DATEN", queue: "WARTESCHLANGE", both: "Ranked + Unranked", ranked: "Nur Ranked", unranked: "Nur Unranked", dataWindow: "ZEITRAUM", days: "Tage", laneOnly: "NUR GLEICHE LANE",
@@ -154,12 +156,14 @@ function detectPositionedHeroes(lines: OcrWord[][], heroes: Hero[]): Detection[]
 
 function classifyScoreboard(detections: Detection[], ownHeroId: number): Detection[] {
   if (detections.length < 2) return detections;
-  const ordered = [...detections].sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
-  let splitAt = Math.ceil(ordered.length / 2), biggestGap = -1;
-  for (let index = 1; index < ordered.length; index += 1) { const gap = (ordered[index].y ?? 0) - (ordered[index - 1].y ?? 0); if (gap > biggestGap) { biggestGap = gap; splitAt = index; } }
-  const rows = [ordered.slice(0, splitAt), ordered.slice(splitAt)].filter((row) => row.length);
-  const allyRowIndex = Math.max(0, rows.findIndex((row) => row.some((entry) => entry.id === ownHeroId)));
-  return rows.flatMap((row, rowIndex) => [...row].sort((a, b) => (a.x ?? 0) - (b.x ?? 0)).map((entry, index) => ({ ...entry, side: rowIndex === allyRowIndex ? "ally" as const : "enemy" as const, lane: (index < 2 ? "yellow" : index < 4 ? "blue" : "green") as Exclude<Lane, "all"> })));
+  const split = (axis: "x" | "y") => { const ordered = [...detections].sort((a, b) => (a[axis] ?? 0) - (b[axis] ?? 0)); let splitAt = Math.ceil(ordered.length / 2), biggestGap = -1; for (let index = 1; index < ordered.length; index += 1) { const gap = (ordered[index][axis] ?? 0) - (ordered[index - 1][axis] ?? 0); if (gap > biggestGap) { biggestGap = gap; splitAt = index; } } return { groups: [ordered.slice(0, splitAt), ordered.slice(splitAt)].filter((group) => group.length), gap: biggestGap }; };
+  const horizontal = split("x"), vertical = split("y"), usesColumns = horizontal.gap > vertical.gap * 2;
+  const groups = usesColumns ? horizontal.groups : vertical.groups;
+  const knownOwnGroup = groups.findIndex((group) => group.some((entry) => entry.id === ownHeroId));
+  const allyGroupIndex = usesColumns ? 0 : knownOwnGroup >= 0 ? knownOwnGroup : 0;
+  const allyGroup = groups[allyGroupIndex] ?? groups[0];
+  const detectedOwn = usesColumns ? [...allyGroup].sort((a, b) => (b.x ?? 0) - (a.x ?? 0))[0] : allyGroup.find((entry) => entry.id === ownHeroId) ?? allyGroup[0];
+  return groups.flatMap((group, groupIndex) => [...group].sort((a, b) => (a.x ?? 0) - (b.x ?? 0)).map((entry, index) => ({ ...entry, side: groupIndex === allyGroupIndex ? "ally" as const : "enemy" as const, isOwn: entry.id === detectedOwn?.id, lane: (index < 2 ? "yellow" : index < 4 ? "blue" : "green") as Exclude<Lane, "all"> })));
 }
 
 function HeroPortrait({ hero, size = "normal" }: { hero?: Hero; size?: "small" | "normal" }) {
@@ -430,7 +434,7 @@ export default function Home() {
       const limit = target === "auto" ? 12 : target === "ally" ? 5 : 6;
       const lines = (result.data.blocks ?? []).flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines.map((line) => line.words as OcrWord[])));
       const positioned = classifyScoreboard(detectPositionedHeroes(lines, heroes), heroId);
-      const found = (positioned.length >= 4 ? positioned : detectHeroNames(result.data.text, heroes, excluded)).filter((entry) => !excluded.includes(entry.id)).slice(0, limit);
+      const found = (positioned.length >= 2 ? positioned : detectHeroNames(result.data.text, heroes, excluded)).filter((entry) => !excluded.includes(entry.id)).slice(0, limit);
       setDetections(found); setSelectedDetections(found.slice(0, limit).map((entry) => entry.id)); setOcrComplete(true);
     } catch { setDetections([]); setOcrComplete(true); }
     finally { if (worker) await worker.terminate(); setOcrRunning(false); }
@@ -441,12 +445,15 @@ export default function Home() {
     if (!ids.length) return;
     if (importTarget === "auto") {
       const selected = detections.filter((entry) => selectedDetections.includes(entry.id));
-      const allies = selected.filter((entry) => entry.side === "ally" && entry.id !== heroId).map((entry) => entry.id).slice(0, 5);
+      const detectedOwn = selected.find((entry) => entry.isOwn) ?? selected.find((entry) => entry.id === heroId);
+      const detectedHeroId = detectedOwn?.id ?? heroId;
+      const allies = selected.filter((entry) => entry.side === "ally" && entry.id !== detectedHeroId).map((entry) => entry.id).slice(0, 5);
       const enemies = selected.filter((entry) => entry.side === "enemy").map((entry) => entry.id).slice(0, 6);
+      if (detectedOwn) setHeroId(detectedHeroId);
       if (allies.length) setAllyIds(allies);
       if (enemies.length) { setEnemyIds(enemies); if (!enemies.includes(carryId)) setCarryId(enemies[0]); }
       const detectedAssignments: Record<number, Exclude<Lane, "all">> = {}; selected.forEach((entry) => { if (entry.lane) detectedAssignments[entry.id] = entry.lane; }); if (Object.keys(detectedAssignments).length) setLaneAssignments(detectedAssignments);
-      const ownDetection = selected.find((entry) => entry.id === heroId); const detectedLane = ownDetection?.lane;
+      const ownDetection = detectedOwn; const detectedLane = ownDetection?.lane;
       if (detectedLane) { selectLane(detectedLane); const opponent = selected.find((entry) => entry.side === "enemy" && entry.lane === detectedLane); if (opponent) setLaneOpponentId(opponent.id); }
     }
     else if (importTarget === "ally") setAllyIds(ids);
@@ -501,6 +508,8 @@ export default function Home() {
         <p>{t.heroText}</p>
       </section>
 
+      <section className="match-import-bar"><div><span>▣</span><p><strong>{t.matchImport}</strong><small>{t.matchImportText}</small></p></div><button type="button" onClick={() => openImporter("auto")}>{t.matchImport} <b>CTRL+V</b> →</button></section>
+
       <div className="analyzer">
         <div className="step-block">
           <div className="step-label"><span>01</span> {t.yourHero}</div>
@@ -509,7 +518,7 @@ export default function Home() {
         <div className="step-block ally-block">
           <div className="step-label"><span>02</span> {t.yourTeam} <b>{allyIds.length + 1}/6</b></div>
           <div className="ally-squad"><div className="ally-chip own"><HeroPortrait hero={ownHero} size="small" /><span><small>{t.ownPick}</small><strong>{ownHero?.name}</strong></span></div>{allyIds.map((id) => { const hero = heroMap.get(id); return <div className="ally-chip" key={id}><HeroPortrait hero={hero} size="small" /><span><small>{t.allyPick}</small><strong>{hero?.name}</strong></span><button type="button" onClick={() => removeAlly(id)} aria-label={`${t.remove} ${hero?.name}`}>×</button></div>; })}{allyIds.length < 5 && <button className="ally-empty" type="button" onClick={openAllyPicker}>＋</button>}</div>
-          <div className="ally-tools"><button type="button" onClick={openAllyPicker}><span>▦</span>{t.buildOwnTeam}</button><button type="button" onClick={() => openImporter("auto")}><span>▣</span>{t.importAllies}</button></div>
+          <div className="ally-tools single"><button type="button" onClick={openAllyPicker}><span>▦</span>{t.buildOwnTeam}</button></div>
         </div>
         <div className="step-block enemy-block">
           <div className="step-label"><span>03</span> {t.enemyTeam} <b>{enemyIds.length}/6</b></div>
@@ -518,7 +527,7 @@ export default function Home() {
             <button className="enemy-remove-card" type="button" onClick={() => removeEnemy(id)} aria-label={`${t.remove} ${hero?.name}`}>×</button>
           </article>; })}{enemyIds.length < 6 && <button className="empty-enemy-slot" type="button" onClick={openEnemyPicker}><span>＋</span><b>{t.addEnemy}</b></button>}</div>
           <p className="carry-hint"><span>★</span> {t.carryHint}</p>
-          <div className="enemy-tools"><button className="manage-enemy-button" type="button" onClick={openEnemyPicker} aria-label={t.openEnemyPicker}><span>▦</span> {t.buildEnemyTeam}</button><button className="import-trigger" type="button" onClick={() => openImporter("auto")}><span>▣</span> {t.importScreen}</button></div>
+          <div className="enemy-tools single"><button className="manage-enemy-button" type="button" onClick={openEnemyPicker} aria-label={t.openEnemyPicker}><span>▦</span> {t.buildEnemyTeam}</button></div>
         </div>
         <div className="step-block carry-block">
           <div className="step-label"><span>04</span> {t.focusTarget}</div>
@@ -639,7 +648,7 @@ export default function Home() {
             <div className="screenshot-preview"><img src={screenshotUrl} alt="Match screenshot preview" />{ocrRunning && <div className="scan-line" />}</div>
             <div className="scan-results">
               {ocrRunning && <div className="ocr-progress"><div><span style={{ width: `${ocrProgress}%` }} /></div><strong>{t.scanning} · {ocrProgress}%</strong></div>}
-              {ocrComplete && <><div className="detected-title"><span>{t.detected}</span><b>{detections.length}</b></div>{detections.length ? <div className="detected-list">{detections.map((entry) => { const hero = heroMap.get(entry.id); const selected = selectedDetections.includes(entry.id); const importLimit = importTarget === "auto" ? 12 : importTarget === "ally" ? 5 : 6; return <label className={selected ? "selected" : ""} key={entry.id}><input type="checkbox" checked={selected} onChange={() => setSelectedDetections((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : current.length < importLimit ? [...current, entry.id] : current)} /><HeroPortrait hero={hero} size="small" /><span><strong>{hero?.name}</strong><small>{entry.side ? `${entry.side.toUpperCase()} · ${entry.lane?.toUpperCase()} LANE` : `${Math.round(entry.confidence * 100)}% ${t.confidence}`}</small></span><i>{selected ? "✓" : "+"}</i></label>; })}</div> : <div className="ocr-empty">{t.noHeroes}</div>}</>}
+              {ocrComplete && <><div className="detected-title"><span>{t.detected}</span><b>{detections.length}</b></div>{detections.length ? <div className="detected-list">{detections.map((entry) => { const hero = heroMap.get(entry.id); const selected = selectedDetections.includes(entry.id); const importLimit = importTarget === "auto" ? 12 : importTarget === "ally" ? 5 : 6; return <label className={`${selected ? "selected" : ""} ${entry.isOwn ? "detected-own" : ""}`} key={entry.id}><input type="checkbox" checked={selected} onChange={() => setSelectedDetections((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : current.length < importLimit ? [...current, entry.id] : current)} /><HeroPortrait hero={hero} size="small" /><span><strong>{hero?.name}{entry.isOwn ? ` · ${t.ownPick}` : ""}</strong><small>{entry.side ? `${entry.side.toUpperCase()} · ${entry.lane?.toUpperCase()} LANE` : `${Math.round(entry.confidence * 100)}% ${t.confidence}`}</small></span><i>{selected ? "✓" : "+"}</i></label>; })}</div> : <div className="ocr-empty">{t.noHeroes}</div>}</>}
             </div>
           </div>}
 
