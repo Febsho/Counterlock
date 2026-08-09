@@ -413,6 +413,11 @@ footer a { color: inherit; }
 .ocr-progress strong { color: var(--acid); font: 800 9px/1 monospace; letter-spacing: .1em; }
 .detected-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; color: #aaa59c; font: 800 9px/1 monospace; letter-spacing: .12em; }
 .detected-title b { display: grid; place-items: center; width: 24px; height: 24px; background: var(--acid); color: var(--ink); }
+.identify-player { display: grid; gap: 7px; padding: 10px; margin-bottom: 10px; border: 1px solid var(--vitality); background: #63b96f12; }
+.identify-player span { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.identify-player strong { font: 800 10px var(--mono); letter-spacing: 1px; }
+.identify-player small { color: #8f8b82; font-size: 10px; }
+.identify-player select { width: 100%; padding: 9px 10px; border: 1px solid #625f58; background: #171715; color: var(--paper); font: 700 12px var(--sans); }
 .detected-list { display: grid; gap: 6px; }
 .detected-list label { display: grid; grid-template-columns: 32px 1fr 22px; align-items: center; gap: 10px; padding: 6px; border: 1px solid #4d4b47; cursor: pointer; }
 .detected-list label.selected { border-color: var(--acid); background: #d9ff430e; }

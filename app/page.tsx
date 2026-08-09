@@ -29,7 +29,7 @@ type ItemStat = { item_id: number; wins: number; losses: number; matches: number
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
 type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[] };
-type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all">; isOwn?: boolean };
+type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all">; isOwn?: boolean; playerName?: string };
 type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
 type ScoreboardSheet = { canvas: HTMLCanvasElement; rowHeight: number };
 type CounterPick = { hero: Hero; score: number; carryRate: number; matches: number; coverage: number };
@@ -61,7 +61,7 @@ const copy = {
     footer: "Community project · Data by", disclaimer: "· Not affiliated with Valve.", early: "EARLY", mid: "MID GAME", late: "LATE",
     importerTitle: "Import enemy team", importerText: "Upload a match screenshot where the enemy hero names are visible. Recognition runs locally on your device.",
     allyImporterText: "Upload a scoreboard screenshot and select the heroes on your side. Recognition runs locally on your device.",
-    autoImporterTitle: "Paste full scoreboard", autoImporterText: "Press Ctrl+V with a scoreboard screenshot. Both teams and Yellow, Blue, and Green lanes are assigned automatically.", pasteHint: "PRESS CTRL+V TO PASTE A SCREENSHOT", autoImport: "IMPORT BOTH TEAMS + LANES",
+    autoImporterTitle: "Paste full scoreboard", autoImporterText: "Press Ctrl+V with a scoreboard screenshot. Both teams and Yellow, Blue, and Green lanes are assigned automatically.", pasteHint: "PRESS CTRL+V TO PASTE A SCREENSHOT", autoImport: "IMPORT BOTH TEAMS + LANES", identifyYourHero: "WHICH HERO ARE YOU?", identifyHint: "Choose once—your player name is remembered on this device.", chooseYourHero: "Choose your hero in this match…",
     matchImport: "IMPORT CURRENT MATCH", matchImportText: "Paste with Ctrl+V or upload one scoreboard screenshot—your hero, allies, enemies, and lanes are detected together.",
     dropTitle: "Drop match screenshot here", dropText: "or click to choose a PNG, JPG, or WebP", scanning: "READING HERO NAMES", detected: "DETECTED HEROES", confidence: "match",
     importHeroes: "IMPORT SELECTED HEROES", scanAgain: "CHOOSE ANOTHER SCREENSHOT", noHeroes: "No hero names were detected. Try a sharper screenshot with the scoreboard fully visible.", close: "Close screenshot importer", localOnly: "PRIVATE · IMAGE NEVER LEAVES YOUR DEVICE",
@@ -95,7 +95,7 @@ const copy = {
     footer: "Community-Projekt · Daten von", disclaimer: "· Nicht mit Valve verbunden.", early: "EARLY", mid: "MID GAME", late: "LATE",
     importerTitle: "Gegnerteam importieren", importerText: "Lade einen Match-Screenshot hoch, auf dem die gegnerischen Heldennamen sichtbar sind. Die Erkennung läuft lokal auf deinem Gerät.",
     allyImporterText: "Lade einen Scoreboard-Screenshot hoch und wähle die Helden auf deiner Seite. Die Erkennung läuft lokal auf deinem Gerät.",
-    autoImporterTitle: "Gesamtes Scoreboard einfügen", autoImporterText: "Drücke Strg+V mit einem Scoreboard-Screenshot. Beide Teams sowie gelbe, blaue und grüne Lane werden automatisch zugeordnet.", pasteHint: "STRG+V DRÜCKEN, UM EINEN SCREENSHOT EINFÜGEN", autoImport: "BEIDE TEAMS + LANES IMPORTIEREN",
+    autoImporterTitle: "Gesamtes Scoreboard einfügen", autoImporterText: "Drücke Strg+V mit einem Scoreboard-Screenshot. Beide Teams sowie gelbe, blaue und grüne Lane werden automatisch zugeordnet.", pasteHint: "STRG+V DRÜCKEN, UM EINEN SCREENSHOT EINFÜGEN", autoImport: "BEIDE TEAMS + LANES IMPORTIEREN", identifyYourHero: "WELCHER HELD BIST DU?", identifyHint: "Einmal auswählen—dein Spielername wird auf diesem Gerät gespeichert.", chooseYourHero: "Deinen Helden in diesem Match wählen…",
     matchImport: "AKTUELLES MATCH IMPORTIEREN", matchImportText: "Mit Strg+V einfügen oder einen Scoreboard-Screenshot hochladen—dein Held, Teams und Lanes werden gemeinsam erkannt.",
     dropTitle: "Match-Screenshot hier ablegen", dropText: "oder klicken, um PNG, JPG oder WebP auszuwählen", scanning: "HELDENNAMEN WERDEN GELESEN", detected: "ERKANNTE HELDEN", confidence: "Treffer",
     importHeroes: "AUSGEWÄHLTE HELDEN IMPORTIEREN", scanAgain: "ANDEREN SCREENSHOT WÄHLEN", noHeroes: "Keine Heldennamen erkannt. Versuche einen schärferen Screenshot mit vollständig sichtbarem Scoreboard.", close: "Screenshot-Import schließen", localOnly: "PRIVAT · DAS BILD BLEIBT AUF DEINEM GERÄT",
@@ -210,13 +210,14 @@ async function createScoreboardSheet(file: File): Promise<ScoreboardSheet | null
   } finally { bitmap.close(); }
 }
 
-function detectScoreboardRows(words: OcrWord[], heroes: Hero[], rowHeight: number, ownHeroId: number): Detection[] {
+function detectScoreboardRows(words: OcrWord[], heroes: Hero[], rowHeight: number): Detection[] {
   const used = new Set<number>(); const found: Detection[] = [];
   for (let slot = 0; slot < 12; slot += 1) {
-    const rowWords = words.filter((word) => {
+    const rawRowWords = words.filter((word) => {
       const center = (word.bbox.y0 + word.bbox.y1) / 2;
       return center >= slot * rowHeight && center < (slot + 1) * rowHeight;
-    }).map((word) => normalizeText(word.text)).filter(Boolean);
+    }).sort((a, b) => a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0);
+    const rowWords = rawRowWords.map((word) => normalizeText(word.text)).filter(Boolean);
     let best: { hero: Hero; confidence: number } | null = null;
     for (const hero of heroes) {
       if (used.has(hero.id)) continue;
@@ -231,9 +232,33 @@ function detectScoreboardRows(words: OcrWord[], heroes: Hero[], rowHeight: numbe
     if (!best) continue;
     used.add(best.hero.id);
     const index = slot % 6;
-    found.push({ id: best.hero.id, confidence: best.confidence, x: slot < 6 ? index : index + 8, y: 0, side: slot < 6 ? "ally" : "enemy", isOwn: slot < 6 && best.hero.id === ownHeroId, lane: index < 2 ? "yellow" : index < 4 ? "blue" : "green" });
+    const playerName = rawRowWords.find((word) => {
+      const normalized = normalizeText(word.text);
+      return normalized.length >= 3 && normalized !== normalizeText(best.hero.name) && !["kda", "kills", "assists"].includes(normalized);
+    })?.text.replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, "");
+    found.push({ id: best.hero.id, confidence: best.confidence, x: slot < 6 ? index : index + 8, y: 0, side: slot < 6 ? "ally" : "enemy", isOwn: false, playerName, lane: index < 2 ? "yellow" : index < 4 ? "blue" : "green" });
   }
   return found;
+}
+
+function attachPlayerNames(detections: Detection[], words: OcrWord[], heroes: Hero[]): Detection[] {
+  const heroNames = new Set(heroes.map((hero) => normalizeText(hero.name)));
+  return detections.map((entry) => {
+    if (entry.x == null || entry.y == null) return entry;
+    const candidate = words.filter((word) => {
+      const x = (word.bbox.x0 + word.bbox.x1) / 2, y = (word.bbox.y0 + word.bbox.y1) / 2;
+      const normalized = normalizeText(word.text);
+      return normalized.length >= 3 && !heroNames.has(normalized) && Math.abs(x - entry.x!) < 90 && y < entry.y! && entry.y! - y < 70;
+    }).sort((a, b) => b.bbox.y1 - a.bbox.y1)[0];
+    return { ...entry, playerName: candidate?.text.replace(/^[^a-z0-9]+|[^a-z0-9]+$/gi, ""), isOwn: false };
+  });
+}
+
+function markRememberedPlayer(detections: Detection[]): Detection[] {
+  const remembered = normalizeText(window.localStorage.getItem("counterbuild-player-name") ?? "");
+  if (!remembered) return detections.map((entry) => ({ ...entry, isOwn: false }));
+  const own = detections.find((entry) => entry.side === "ally" && normalizeText(entry.playerName ?? "") === remembered);
+  return detections.map((entry) => ({ ...entry, isOwn: entry.id === own?.id }));
 }
 
 function classifyScoreboard(detections: Detection[], ownHeroId: number): Detection[] {
@@ -519,17 +544,17 @@ export default function Home() {
         await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
         const result = await worker.recognize(sheet.canvas, {}, { blocks: true });
         const words = (result.data.blocks ?? []).flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines.flatMap((line) => line.words as OcrWord[])));
-        found = detectScoreboardRows(words, heroes, sheet.rowHeight, heroId);
+        found = detectScoreboardRows(words, heroes, sheet.rowHeight);
       }
       if (found.length < 8) {
         await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
         const result = await worker.recognize(file, {}, { blocks: true });
         const lines = (result.data.blocks ?? []).flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines.map((line) => line.words as OcrWord[])));
-        const positioned = classifyScoreboard(detectPositionedHeroes(lines, heroes), heroId);
+        const positioned = attachPlayerNames(classifyScoreboard(detectPositionedHeroes(lines, heroes), heroId), lines.flat(), heroes);
         const fallback = positioned.length >= 2 ? positioned : detectHeroNames(result.data.text, heroes, excluded);
         const existing = new Set(found.map((entry) => entry.id)); found = [...found, ...fallback.filter((entry) => !existing.has(entry.id))];
       }
-      found = found.filter((entry) => !excluded.includes(entry.id)).slice(0, limit);
+      found = markRememberedPlayer(found.filter((entry) => !excluded.includes(entry.id)).slice(0, limit));
       setDetections(found); setSelectedDetections(found.slice(0, limit).map((entry) => entry.id)); setOcrComplete(true);
     } catch { setDetections([]); setOcrComplete(true); }
     finally { if (worker) await worker.terminate(); setOcrRunning(false); }
@@ -544,7 +569,7 @@ export default function Home() {
       const detectedHeroId = detectedOwn?.id ?? heroId;
       const allies = selected.filter((entry) => entry.side === "ally" && entry.id !== detectedHeroId).map((entry) => entry.id).slice(0, 5);
       const enemies = selected.filter((entry) => entry.side === "enemy").map((entry) => entry.id).slice(0, 6);
-      if (detectedOwn) setHeroId(detectedHeroId);
+      if (detectedOwn) { setHeroId(detectedHeroId); if (detectedOwn.playerName) window.localStorage.setItem("counterbuild-player-name", normalizeText(detectedOwn.playerName)); }
       if (allies.length) setAllyIds(allies);
       if (enemies.length) { setEnemyIds(enemies); if (!enemies.includes(carryId)) setCarryId(enemies[0]); }
       const detectedAssignments: Record<number, Exclude<Lane, "all">> = {}; selected.forEach((entry) => { if (entry.lane) detectedAssignments[entry.id] = entry.lane; }); if (Object.keys(detectedAssignments).length) setLaneAssignments(detectedAssignments);
@@ -743,11 +768,14 @@ export default function Home() {
             <div className="screenshot-preview"><img src={screenshotUrl} alt="Match screenshot preview" />{ocrRunning && <div className="scan-line" />}</div>
             <div className="scan-results">
               {ocrRunning && <div className="ocr-progress"><div><span style={{ width: `${ocrProgress}%` }} /></div><strong>{t.scanning} · {ocrProgress}%</strong></div>}
-              {ocrComplete && <><div className="detected-title"><span>{t.detected}</span><b>{detections.length}</b></div>{detections.length ? <div className="detected-list">{detections.map((entry) => { const hero = heroMap.get(entry.id); const selected = selectedDetections.includes(entry.id); const importLimit = importTarget === "auto" ? 12 : importTarget === "ally" ? 5 : 6; return <label className={`${selected ? "selected" : ""} ${entry.isOwn ? "detected-own" : ""}`} key={entry.id}><input type="checkbox" checked={selected} onChange={() => setSelectedDetections((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : current.length < importLimit ? [...current, entry.id] : current)} /><HeroPortrait hero={hero} size="small" /><span><strong>{hero?.name}{entry.isOwn ? ` · ${t.ownPick}` : ""}</strong><small>{entry.side ? `${entry.side.toUpperCase()} · ${entry.lane?.toUpperCase()} LANE` : `${Math.round(entry.confidence * 100)}% ${t.confidence}`}</small></span><i>{selected ? "✓" : "+"}</i></label>; })}</div> : <div className="ocr-empty">{t.noHeroes}</div>}</>}
+              {ocrComplete && <><div className="detected-title"><span>{t.detected}</span><b>{detections.length}</b></div>{detections.length ? <>
+                {importTarget === "auto" && <label className="identify-player"><span><strong>{t.identifyYourHero}</strong><small>{t.identifyHint}</small></span><select value={detections.find((entry) => entry.isOwn)?.id ?? ""} onChange={(event) => { const id = Number(event.target.value); setDetections((current) => current.map((entry) => ({ ...entry, isOwn: entry.id === id }))); }}><option value="">{t.chooseYourHero}</option>{detections.filter((entry) => entry.side === "ally").map((entry) => <option key={entry.id} value={entry.id}>{heroMap.get(entry.id)?.name}{entry.playerName ? ` · ${entry.playerName}` : ""}</option>)}</select></label>}
+                <div className="detected-list">{detections.map((entry) => { const hero = heroMap.get(entry.id); const selected = selectedDetections.includes(entry.id); const importLimit = importTarget === "auto" ? 12 : importTarget === "ally" ? 5 : 6; return <label className={`${selected ? "selected" : ""} ${entry.isOwn ? "detected-own" : ""}`} key={entry.id}><input type="checkbox" checked={selected} onChange={() => setSelectedDetections((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : current.length < importLimit ? [...current, entry.id] : current)} /><HeroPortrait hero={hero} size="small" /><span><strong>{hero?.name}{entry.isOwn ? ` · ${t.ownPick}` : ""}</strong><small>{entry.side ? `${entry.side.toUpperCase()} · ${entry.lane?.toUpperCase()} LANE` : `${Math.round(entry.confidence * 100)}% ${t.confidence}`}</small></span><i>{selected ? "✓" : "+"}</i></label>; })}</div>
+              </> : <div className="ocr-empty">{t.noHeroes}</div>}</>}
             </div>
           </div>}
 
-          {screenshotUrl && <div className="import-actions"><label className="rescan-button"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readScreenshot(file); }} />{t.scanAgain}</label><button type="button" onClick={importDetectedHeroes} disabled={!selectedDetections.length || ocrRunning}>{importTarget === "auto" ? t.autoImport : importTarget === "ally" ? t.applyAllies : t.importHeroes} ({selectedDetections.length}/{importTarget === "auto" ? 12 : importTarget === "ally" ? 5 : 6}) →</button></div>}
+          {screenshotUrl && <div className="import-actions"><label className="rescan-button"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readScreenshot(file); }} />{t.scanAgain}</label><button type="button" onClick={importDetectedHeroes} disabled={!selectedDetections.length || ocrRunning || (importTarget === "auto" && !detections.some((entry) => entry.isOwn))}>{importTarget === "auto" ? t.autoImport : importTarget === "ally" ? t.applyAllies : t.importHeroes} ({selectedDetections.length}/{importTarget === "auto" ? 12 : importTarget === "ally" ? 5 : 6}) →</button></div>}
         </div>
       </div>}
     </main>
