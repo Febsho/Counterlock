@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const API = "https://api.deadlock-api.com/v1";
 
@@ -9,6 +9,7 @@ type Category = "all" | "weapon" | "vitality" | "spirit";
 type SortMode = "recommended" | "winrate" | "sample" | "cost";
 type Phase = "early" | "mid" | "late";
 type QueueMode = "all" | "ranked" | "unranked";
+type BuyTarget = "carry" | "team";
 
 type Hero = { id: number; name: string; images?: { icon_image_small_webp?: string; icon_hero_card_webp?: string } };
 type Item = {
@@ -22,7 +23,7 @@ type Item = {
 };
 type ItemStat = { item_id: number; wins: number; losses: number; matches: number; players: number; avg_buy_time_s: number };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
-type Recommendation = { item: Item; score: number; winRate: number; baselineRate: number; carryRate: number; matches: number; buyTime: number };
+type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; carryBuyTime: number; teamBuyTime: number };
 type Detection = { id: number; confidence: number };
 type CounterPick = { hero: Hero; score: number; carryRate: number; matches: number; coverage: number };
 
@@ -36,7 +37,8 @@ const copy = {
     buildEnemyTeam: "BUILD ENEMY TEAM", enemyRoster: "ENEMY ROSTER", enemySearch: "Search enemy heroes…", teamSelected: "TEAM SELECTED", applyTeam: "APPLY TEAM", cancel: "CANCEL", carryHint: "Click a hero card to mark the enemy carry.", openEnemyPicker: "Open enemy team picker", closeEnemyPicker: "Close enemy team picker", teamSlots: "TEAM SLOTS", ownPick: "YOUR PICK",
     focusTarget: "FOCUS TARGET", enemyCarry: "ENEMY CARRY", matchupWr: "YOUR MATCHUP WR",
     analyze: "ANALYZE MATCHUP →", analyzing: "ANALYZING …",
-    liveRec: "LIVE RECOMMENDATION", bestBuys: "Your best buys", against: "against",
+    liveRec: "LIVE RECOMMENDATION", bestBuys: "Your best buys", against: "against", enemyLineup: "the full enemy team", vsCarryMode: "VS CARRY", vsTeamMode: "VS TEAM", buyTarget: "RECOMMENDATION TARGET", vsTeam: "percentage points vs. hero baseline across the team",
+    autoLive: "LIVE · AUTO-UPDATES", autoUpdating: "UPDATING MATCHUP …", autoHint: "Changes refresh instantly",
     currentMinute: "CURRENT MINUTE", filters: "SMART FILTERS", category: "CATEGORY", all: "All",
     weapon: "Weapon", vitality: "Vitality", spirit: "Spirit", minSample: "MIN. SAMPLE", sort: "SORT BY",
     recommended: "Recommended", winrate: "Win rate", sample: "Sample size", cost: "Cost",
@@ -62,7 +64,8 @@ const copy = {
     buildEnemyTeam: "GEGNERTEAM BAUEN", enemyRoster: "GEGNER-ROSTER", enemySearch: "Gegnerische Helden suchen…", teamSelected: "TEAM AUSGEWÄHLT", applyTeam: "TEAM ÜBERNEHMEN", cancel: "ABBRECHEN", carryHint: "Klicke auf eine Heldenkarte, um den gegnerischen Carry zu markieren.", openEnemyPicker: "Gegnerteam-Auswahl öffnen", closeEnemyPicker: "Gegnerteam-Auswahl schließen", teamSlots: "TEAM-PLÄTZE", ownPick: "DEIN PICK",
     focusTarget: "FOKUS-ZIEL", enemyCarry: "GEGNERISCHER CARRY", matchupWr: "DEINE MATCHUP-WR",
     analyze: "MATCHUP ANALYSIEREN →", analyzing: "ANALYSE LÄUFT …",
-    liveRec: "LIVE-EMPFEHLUNG", bestBuys: "Deine besten Käufe", against: "gegen",
+    liveRec: "LIVE-EMPFEHLUNG", bestBuys: "Deine besten Käufe", against: "gegen", enemyLineup: "das gesamte Gegnerteam", vsCarryMode: "GEGEN CARRY", vsTeamMode: "GEGEN TEAM", buyTarget: "EMPFEHLUNGSZIEL", vsTeam: "Prozentpunkte gegen die Helden-Basis im gesamten Team",
+    autoLive: "LIVE · AUTO-UPDATE", autoUpdating: "MATCHUP WIRD AKTUALISIERT …", autoHint: "Änderungen werden sofort übernommen",
     currentMinute: "AKTUELLE MINUTE", filters: "INTELLIGENTE FILTER", category: "KATEGORIE", all: "Alle",
     weapon: "Waffe", vitality: "Vitalität", spirit: "Spirit", minSample: "MIN. STICHPROBE", sort: "SORTIERUNG",
     recommended: "Empfehlung", winrate: "Winrate", sample: "Stichprobe", cost: "Kosten",
@@ -139,6 +142,7 @@ export default function Home() {
   const [category, setCategory] = useState<Category>("all");
   const [minSample, setMinSample] = useState(250);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
+  const [buyTarget, setBuyTarget] = useState<BuyTarget>("carry");
   const [queueMode, setQueueMode] = useState<QueueMode>("all");
   const [dataWindow, setDataWindow] = useState(30);
   const [laneOnly, setLaneOnly] = useState(false);
@@ -162,6 +166,7 @@ export default function Home() {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [selectedDetections, setSelectedDetections] = useState<number[]>([]);
   const enemyRosterRef = useRef<HTMLDivElement>(null);
+  const analysisRunRef = useRef(0);
   const t = copy[lang];
   const phase: Phase = gameMinute < 11 ? "early" : gameMinute < 21 ? "mid" : "late";
 
@@ -185,6 +190,7 @@ export default function Home() {
     const minute = Number(params.get("minute")); if (minute >= 1 && minute <= 40) setGameMinute(minute);
     const queue = params.get("queue"); if (queue === "ranked" || queue === "unranked") setQueueMode(queue);
     const windowDays = Number(params.get("window")); if ([7, 30, 90].includes(windowDays)) setDataWindow(windowDays);
+    if (params.get("target") === "team") setBuyTarget("team");
   }, []);
 
   useEffect(() => {
@@ -205,7 +211,8 @@ export default function Home() {
 
   const analyze = useCallback(async () => {
     if (!items.length || !enemyIds.length) return;
-    setLoading(true); setError(""); setCopied(false);
+    const runId = ++analysisRunRef.current;
+    setLoading(true); setMatchup(null); setError(""); setCopied(false);
     try {
       const commonParams = new URLSearchParams({ min_matches: "80", game_mode: "normal", min_unix_timestamp: String(Math.floor(Date.now() / 1000) - dataWindow * 86400) });
       if (queueMode !== "all") commonParams.set("match_mode", queueMode);
@@ -218,6 +225,7 @@ export default function Home() {
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${carryId}&${matchupCommon}`).then((r) => r.json()),
         fetch(`${API}/analytics/hero-counter-stats?${matchupCommon}`).then((r) => r.json()),
       ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[]];
+      if (runId !== analysisRunRef.current) return;
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
       const carryMap = new Map(carryStats.map((stat) => [stat.item_id, stat]));
@@ -225,24 +233,27 @@ export default function Home() {
         const base = baseMap.get(item.id), team = teamMap.get(item.id), carry = carryMap.get(item.id);
         if (!team || !carry) return null;
         const baselineRate = adjustedRate(base), winRate = adjustedRate(team), carryRate = adjustedRate(carry);
-        const confidence = Math.min(1, Math.log10(Math.max(10, carry.matches)) / 4.7);
-        const uplift = Math.max(-0.06, Math.min(0.06, carryRate - baselineRate));
-        return { item, score: (carryRate * .5 + winRate * .3 + baselineRate * .2 + uplift * .35) * confidence, winRate, baselineRate, carryRate, matches: carry.matches, buyTime: carry.avg_buy_time_s } satisfies Recommendation;
+        const carryConfidence = Math.min(1, Math.log10(Math.max(10, carry.matches)) / 4.7);
+        const teamConfidence = Math.min(1, Math.log10(Math.max(10, team.matches)) / 4.7);
+        const carryUplift = Math.max(-0.06, Math.min(0.06, carryRate - baselineRate));
+        const teamUplift = Math.max(-0.06, Math.min(0.06, winRate - baselineRate));
+        return { item, carryScore: (carryRate * .65 + winRate * .15 + baselineRate * .2 + carryUplift * .35) * carryConfidence, teamScore: (winRate * .7 + carryRate * .1 + baselineRate * .2 + teamUplift * .35) * teamConfidence, teamRate: winRate, baselineRate, carryRate, carryMatches: carry.matches, teamMatches: team.matches, carryBuyTime: carry.avg_buy_time_s, teamBuyTime: team.avg_buy_time_s } satisfies Recommendation;
       }).filter((value): value is Recommendation => Boolean(value)));
       setAllCounterStats(counterStats);
       setMatchup(counterStats.find((stat) => stat.hero_id === heroId && stat.enemy_hero_id === carryId) ?? null);
       setUpdatedAt(new Date());
-    } catch { setError(copy[lang].statsError); }
-    finally { setLoading(false); }
+    } catch { if (runId === analysisRunRef.current) setError(copy[lang].statsError); }
+    finally { if (runId === analysisRunRef.current) setLoading(false); }
   }, [carryId, dataWindow, enemyIds, heroId, items, laneOnly, lang, queueMode]);
 
-  useEffect(() => { if (items.length) void analyze(); }, [items]);
+  useEffect(() => { if (items.length && enemyIds.length) void analyze(); }, [analyze, enemyIds.length, items.length]);
 
   const visibleRecommendations = useMemo(() => {
     const [start, end] = phaseRanges[phase];
-    const filtered = recommendations.filter((entry) => entry.buyTime >= start && entry.buyTime <= end && entry.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || entry.carryRate > entry.baselineRate));
-    return filtered.sort((a, b) => sortMode === "winrate" ? b.carryRate - a.carryRate : sortMode === "sample" ? b.matches - a.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : b.score - a.score).slice(0, resultCount);
-  }, [category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
+    const values = (entry: Recommendation) => buyTarget === "team" ? { rate: entry.teamRate, matches: entry.teamMatches, buyTime: entry.teamBuyTime, score: entry.teamScore } : { rate: entry.carryRate, matches: entry.carryMatches, buyTime: entry.carryBuyTime, score: entry.carryScore };
+    const filtered = recommendations.filter((entry) => { const value = values(entry); return value.buyTime >= start && value.buyTime <= end && value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
+    return filtered.sort((a, b) => { const av = values(a), bv = values(b); return sortMode === "winrate" ? bv.rate - av.rate : sortMode === "sample" ? bv.matches - av.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : bv.score - av.score; }).slice(0, resultCount);
+  }, [buyTarget, category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
 
   const counterPicks = useMemo<CounterPick[]>(() => {
     if (!allCounterStats.length || !enemyIds.length) return [];
@@ -286,7 +297,6 @@ export default function Home() {
     if (!pendingEnemyIds.includes(carryId)) setCarryId(pendingEnemyIds[0]);
     closeEnemyPicker();
   }
-  function submit(event: FormEvent) { event.preventDefault(); void analyze(); }
   async function readScreenshot(file: File) {
     if (!file.type.startsWith("image/")) return;
     if (screenshotUrl) URL.revokeObjectURL(screenshotUrl);
@@ -312,7 +322,7 @@ export default function Home() {
     try { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 2200); } catch { setCopied(false); }
   }
   async function shareMatchup() {
-    const params = new URLSearchParams({ hero: String(heroId), enemies: enemyIds.join(","), carry: String(carryId), minute: String(gameMinute), queue: queueMode, window: String(dataWindow) });
+    const params = new URLSearchParams({ hero: String(heroId), enemies: enemyIds.join(","), carry: String(carryId), minute: String(gameMinute), queue: queueMode, window: String(dataWindow), target: buyTarget });
     const url = `${window.location.origin}${window.location.pathname}?${params}`;
     try { await navigator.clipboard.writeText(url); window.history.replaceState(null, "", url); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 2200); } catch { setLinkCopied(false); }
   }
@@ -348,7 +358,7 @@ export default function Home() {
         <p>{t.heroText}</p>
       </section>
 
-      <form className="analyzer" onSubmit={submit}>
+      <div className="analyzer">
         <div className="step-block">
           <div className="step-label"><span>01</span> {t.yourHero}</div>
           <button className="selected-hero-button" type="button" onClick={() => setHeroPickerOpen(true)} aria-haspopup="dialog"><HeroPortrait hero={ownHero} /><span><small>{t.youPlay}</small><strong>{ownHero?.name ?? "—"}</strong><i>{t.changeHero}</i></span><b>⌄</b></button>
@@ -365,9 +375,9 @@ export default function Home() {
         <div className="step-block carry-block">
           <div className="step-label"><span>03</span> {t.focusTarget}</div>
           <div className="carry-card"><HeroPortrait hero={carryHero} /><div><small>{t.enemyCarry}</small><strong>{carryHero?.name ?? "–"}</strong></div>{matchupWinRate !== null && <div className="threat"><small>{t.matchupWr}</small><strong>{pct(matchupWinRate)}</strong></div>}</div>
-          <button className="analyze-button" disabled={loading || !enemyIds.length} type="submit">{loading ? t.analyzing : t.analyze}</button>
+          <div className={`auto-update-status ${loading ? "updating" : ""}`}><span /><div><strong>{loading ? t.autoUpdating : t.autoLive}</strong><small>{t.autoHint}</small></div></div>
         </div>
-      </form>
+      </div>
 
       {Boolean(counterPicks.length) && <section className="counterpick-section">
         <div className="counterpick-heading"><div><div className="eyebrow">{t.counterpickKicker}</div><h2>{t.counterpickTitle} <span>{enemyIds.length > 1 ? t.enemyTeam : carryHero?.name}</span></h2></div><p>{t.counterpickText}</p></div>
@@ -380,7 +390,7 @@ export default function Home() {
       </section>}
 
       <section className="results" aria-live="polite">
-        <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {carryHero?.name}</span></h2></div><div className="result-actions"><button className="copy-build" onClick={shareMatchup}>{linkCopied ? t.linkCopied : t.share}</button><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div></div>
+        <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {buyTarget === "team" ? t.enemyLineup : carryHero?.name}</span></h2></div><div className="result-controls"><div className="buy-target-switch" aria-label={t.buyTarget}><small>{t.buyTarget}</small><div><button className={buyTarget === "carry" ? "active" : ""} type="button" onClick={() => setBuyTarget("carry")}>{t.vsCarryMode}</button><button className={buyTarget === "team" ? "active" : ""} type="button" onClick={() => setBuyTarget("team")}>{t.vsTeamMode}</button></div></div><div className="result-actions"><button className="copy-build" onClick={shareMatchup}>{linkCopied ? t.linkCopied : t.share}</button><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div></div></div>
 
         <div className="match-context">
           <label className="minute-control"><span><small>{t.currentMinute}</small><strong>{gameMinute}:00</strong></span><input type="range" min="1" max="40" value={gameMinute} onChange={(event) => setGameMinute(Number(event.target.value))} /><div className="phase-tabs">{(["early", "mid", "late"] as Phase[]).map((value) => <button type="button" key={value} className={phase === value ? "active" : ""} onClick={() => setGameMinute(value === "early" ? 7 : value === "mid" ? 15 : 26)}>{t[value]}</button>)}</div></label>
@@ -401,7 +411,7 @@ export default function Home() {
         {error && <div className="error-card">{error}</div>}
         {!error && loading && <div className="loading-grid">{[1,2,3,4].map((n) => <div key={n} />)}</div>}
         {!error && !loading && !visibleRecommendations.length && <div className="empty-card">{t.empty}</div>}
-        {!error && !loading && Boolean(visibleRecommendations.length) && <div className="item-grid">{visibleRecommendations.map((entry, index) => { const lift = (entry.carryRate - entry.baselineRate) * 100; return <article className={`item-card slot-${entry.item.item_slot_type}`} key={entry.item.id}><div className="rank">#{String(index + 1).padStart(2, "0")}</div><div className="item-icon">{entry.item.shop_image_webp ? <img src={entry.item.shop_image_webp} alt="" /> : <span>◆</span>}</div><div className="item-main"><div className="item-meta"><span>{entry.item.item_slot_type && t[entry.item.item_slot_type]}</span><span>T{entry.item.item_tier}</span></div><h3>{entry.item.name}</h3><div className="item-reason">{lift >= 0 ? "+" : ""}{lift.toFixed(1)} {t.vsCarry}</div></div><div className="item-stat"><small>{t.winrateLabel}</small><strong>{pct(entry.carryRate)}</strong></div><div className="item-stat"><small>{t.sample}</small><strong>{formatMatches(entry.matches, lang)}</strong></div><div className="item-stat"><small>{t.buyTime}</small><strong>{formatTime(entry.buyTime, lang)}</strong></div><div className="cost">◈ {entry.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</div></article>; })}</div>}
+        {!error && !loading && Boolean(visibleRecommendations.length) && <div className="item-grid">{visibleRecommendations.map((entry, index) => { const rate = buyTarget === "team" ? entry.teamRate : entry.carryRate; const matches = buyTarget === "team" ? entry.teamMatches : entry.carryMatches; const buyTime = buyTarget === "team" ? entry.teamBuyTime : entry.carryBuyTime; const lift = (rate - entry.baselineRate) * 100; return <article className={`item-card slot-${entry.item.item_slot_type}`} key={entry.item.id}><div className="rank">#{String(index + 1).padStart(2, "0")}</div><div className="item-icon">{entry.item.shop_image_webp ? <img src={entry.item.shop_image_webp} alt="" /> : <span>◆</span>}</div><div className="item-main"><div className="item-meta"><span>{entry.item.item_slot_type && t[entry.item.item_slot_type]}</span><span>{buyTarget === "team" ? t.vsTeamMode : t.vsCarryMode}</span><span>T{entry.item.item_tier}</span></div><h3>{entry.item.name}</h3><div className="item-reason">{lift >= 0 ? "+" : ""}{lift.toFixed(1)} {buyTarget === "team" ? t.vsTeam : t.vsCarry}</div></div><div className="item-stat"><small>{t.winrateLabel}</small><strong>{pct(rate)}</strong></div><div className="item-stat"><small>{t.sample}</small><strong>{formatMatches(matches, lang)}</strong></div><div className="item-stat"><small>{t.buyTime}</small><strong>{formatTime(buyTime, lang)}</strong></div><div className="cost">◈ {entry.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</div></article>; })}</div>}
 
         <div className="method-note"><span>i</span><p><strong>{t.methodTitle}</strong> {t.method}</p>{updatedAt && <time>{t.updated} {updatedAt.toLocaleTimeString(lang === "de" ? "de-DE" : "en-US", { hour: "2-digit", minute: "2-digit" })}</time>}</div>
       </section>

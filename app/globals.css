@@ -113,6 +113,12 @@ select { width: 100%; border: 0; background: transparent; color: var(--ink); fon
 .analyze-button { width: 100%; margin-top: 10px; padding: 14px 16px; border: 2px solid var(--ink); background: var(--acid); box-shadow: 4px 4px 0 var(--ink); font: 900 11px/1 monospace; letter-spacing: .08em; cursor: pointer; transition: transform .15s, box-shadow .15s; }
 .analyze-button:hover:not(:disabled) { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
 .analyze-button:disabled { opacity: .55; cursor: wait; }
+.auto-update-status { display: flex; align-items: center; gap: 11px; min-height: 48px; margin-top: 10px; padding: 10px 13px; border: 1px solid #aaa398; background: #f6f2e8; }
+.auto-update-status > span { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: #42a94f; box-shadow: 0 0 0 5px #42a94f22; }
+.auto-update-status strong { display: block; font: 900 9px/1 monospace; letter-spacing: .08em; }
+.auto-update-status small { margin: 5px 0 0; color: #777168; }
+.auto-update-status.updating > span { background: var(--red); box-shadow: 0 0 0 5px #ff493d22; animation: live-pulse .8s ease-in-out infinite alternate; }
+@keyframes live-pulse { to { opacity: .3; transform: scale(.7); } }
 
 .counterpick-section { padding: 56px clamp(20px, 7vw, 108px) 64px; border-bottom: 2px solid var(--ink); background: var(--paper); }
 .counterpick-heading { display: flex; align-items: end; justify-content: space-between; gap: 30px; margin-bottom: 26px; }
@@ -138,6 +144,13 @@ select { width: 100%; border: 0; background: transparent; color: var(--ink); fon
 
 .results { padding: 62px clamp(20px, 7vw, 108px) 70px; background: var(--ink); color: var(--paper); }
 .results-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.result-controls { display: grid; justify-items: end; gap: 10px; }
+.buy-target-switch { min-width: 292px; }
+.buy-target-switch > small { margin-bottom: 7px; color: #8e8980; text-align: right; }
+.buy-target-switch > div { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #5d5b56; }
+.buy-target-switch button { min-height: 38px; padding: 9px 13px; border: 0; border-right: 1px solid #5d5b56; background: transparent; color: #a8a39a; font: 900 8px/1 monospace; letter-spacing: .08em; cursor: pointer; }
+.buy-target-switch button:last-child { border-right: 0; }
+.buy-target-switch button.active { background: var(--acid); color: var(--ink); }
 .results .eyebrow { color: #969188; }
 h2 { margin: 0; text-transform: uppercase; font-size: clamp(30px, 4vw, 54px); line-height: .95; letter-spacing: -.055em; }
 h2 span { display: block; color: var(--acid); font-style: italic; }
@@ -317,6 +330,9 @@ footer a { color: inherit; }
   .counterpick-grid article:nth-child(2) { border-right: 0; }
   .counterpick-grid article:last-child { border-bottom: 0; }
   .results-heading { align-items: start; flex-direction: column; }
+  .result-controls { width: 100%; justify-items: stretch; }
+  .buy-target-switch { width: 100%; min-width: 0; }
+  .buy-target-switch > small { text-align: left; }
   .copy-build { width: 100%; }
   .result-actions { width: 100%; flex-direction: column; }
   .phase-tabs { width: 100%; }
