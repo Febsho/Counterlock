@@ -24,6 +24,7 @@ type ItemStat = { item_id: number; wins: number; losses: number; matches: number
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type Recommendation = { item: Item; score: number; winRate: number; baselineRate: number; carryRate: number; matches: number; buyTime: number };
 type Detection = { id: number; confidence: number };
+type CounterPick = { hero: Hero; score: number; carryRate: number; matches: number; coverage: number };
 
 const copy = {
   en: {
@@ -49,6 +50,7 @@ const copy = {
     importHeroes: "IMPORT SELECTED HEROES", scanAgain: "CHOOSE ANOTHER SCREENSHOT", noHeroes: "No hero names were detected. Try a sharper screenshot with the scoreboard fully visible.", close: "Close screenshot importer", localOnly: "PRIVATE · IMAGE NEVER LEAVES YOUR DEVICE",
     moreOptions: "MORE OPTIONS", apiFilters: "MATCH DATA", queue: "QUEUE", both: "Ranked + Unranked", ranked: "Ranked only", unranked: "Unranked only", dataWindow: "DATA WINDOW", days: "days", laneOnly: "SAME LANE ONLY",
     itemRules: "ITEM RULES", maxBudget: "MAX. BUDGET", noLimit: "No limit", itemTier: "ITEM TIER", anyTier: "Any tier", resultCount: "RESULT COUNT", positiveLift: "POSITIVE LIFT ONLY", reanalyzeHint: "Queue, time window, and lane filters apply after Analyze Matchup.",
+    counterpickKicker: "DRAFT ASSISTANT", counterpickTitle: "Heroes that counter", counterpickText: "Scored against the full enemy lineup, with extra weight on the marked carry.", bestPick: "BEST PICK", teamWr: "LINEUP SCORE", carryWr: "VS. CARRY", useHero: "PLAY THIS HERO", coverage: "matchups covered", currentPick: "CURRENT PICK",
   },
   de: {
     home: "Counterbuild Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE",
@@ -73,6 +75,7 @@ const copy = {
     importHeroes: "AUSGEWÄHLTE HELDEN IMPORTIEREN", scanAgain: "ANDEREN SCREENSHOT WÄHLEN", noHeroes: "Keine Heldennamen erkannt. Versuche einen schärferen Screenshot mit vollständig sichtbarem Scoreboard.", close: "Screenshot-Import schließen", localOnly: "PRIVAT · DAS BILD BLEIBT AUF DEINEM GERÄT",
     moreOptions: "MEHR OPTIONEN", apiFilters: "MATCH-DATEN", queue: "WARTESCHLANGE", both: "Ranked + Unranked", ranked: "Nur Ranked", unranked: "Nur Unranked", dataWindow: "ZEITRAUM", days: "Tage", laneOnly: "NUR GLEICHE LANE",
     itemRules: "ITEM-REGELN", maxBudget: "MAX. BUDGET", noLimit: "Kein Limit", itemTier: "ITEM-TIER", anyTier: "Alle Tiers", resultCount: "ANZAHL ERGEBNISSE", positiveLift: "NUR POSITIVER LIFT", reanalyzeHint: "Warteschlange, Zeitraum und Lane-Filter gelten nach der nächsten Matchup-Analyse.",
+    counterpickKicker: "DRAFT-ASSISTENT", counterpickTitle: "Helden als Counter", counterpickText: "Bewertet gegen das gesamte Gegnerteam, mit zusätzlichem Gewicht auf dem markierten Carry.", bestPick: "BESTER PICK", teamWr: "LINEUP-SCORE", carryWr: "GEGEN CARRY", useHero: "DIESEN HELDEN SPIELEN", coverage: "Matchups abgedeckt", currentPick: "AKTUELLER PICK",
   },
 } as const;
 
@@ -139,6 +142,7 @@ export default function Home() {
   const [positiveLiftOnly, setPositiveLiftOnly] = useState(false);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [matchup, setMatchup] = useState<CounterStat | null>(null);
+  const [allCounterStats, setAllCounterStats] = useState<CounterStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -214,6 +218,7 @@ export default function Home() {
         const uplift = Math.max(-0.06, Math.min(0.06, carryRate - baselineRate));
         return { item, score: (carryRate * .5 + winRate * .3 + baselineRate * .2 + uplift * .35) * confidence, winRate, baselineRate, carryRate, matches: carry.matches, buyTime: carry.avg_buy_time_s } satisfies Recommendation;
       }).filter((value): value is Recommendation => Boolean(value)));
+      setAllCounterStats(counterStats);
       setMatchup(counterStats.find((stat) => stat.hero_id === heroId && stat.enemy_hero_id === carryId) ?? null);
       setUpdatedAt(new Date());
     } catch { setError(copy[lang].statsError); }
@@ -227,6 +232,25 @@ export default function Home() {
     const filtered = recommendations.filter((entry) => entry.buyTime >= start && entry.buyTime <= end && entry.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || entry.carryRate > entry.baselineRate));
     return filtered.sort((a, b) => sortMode === "winrate" ? b.carryRate - a.carryRate : sortMode === "sample" ? b.matches - a.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : b.score - a.score).slice(0, resultCount);
   }, [category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
+
+  const counterPicks = useMemo<CounterPick[]>(() => {
+    if (!allCounterStats.length || !enemyIds.length) return [];
+    const statsMap = new Map(allCounterStats.map((stat) => [`${stat.hero_id}:${stat.enemy_hero_id}`, stat]));
+    return heroes.filter((hero) => !enemyIds.includes(hero.id)).map((hero) => {
+      let weightedRate = 0, totalWeight = 0, matches = 0, coverage = 0, carryRate = .5;
+      enemyIds.forEach((enemyId) => {
+        const stat = statsMap.get(`${hero.id}:${enemyId}`);
+        if (!stat) return;
+        const rate = (stat.wins + 50) / (stat.matches_played + 100);
+        const weight = enemyId === carryId ? 2 : 1;
+        weightedRate += rate * weight; totalWeight += weight; matches += stat.matches_played; coverage += 1;
+        if (enemyId === carryId) carryRate = rate;
+      });
+      if (!totalWeight) return null;
+      const coverageFactor = .8 + .2 * (coverage / enemyIds.length);
+      return { hero, score: (weightedRate / totalWeight) * coverageFactor, carryRate, matches, coverage };
+    }).filter((entry): entry is CounterPick => Boolean(entry)).sort((a, b) => b.score - a.score).slice(0, 4);
+  }, [allCounterStats, carryId, enemyIds, heroes]);
 
   function addEnemy() { if (enemyToAdd !== heroId && !enemyIds.includes(enemyToAdd) && enemyIds.length < 6) setEnemyIds((current) => [...current, enemyToAdd]); }
   function removeEnemy(id: number) { const next = enemyIds.filter((enemyId) => enemyId !== id); setEnemyIds(next); if (carryId === id && next.length) setCarryId(next[0]); }
@@ -259,6 +283,10 @@ export default function Home() {
     const params = new URLSearchParams({ hero: String(heroId), enemies: enemyIds.join(","), carry: String(carryId), minute: String(gameMinute), queue: queueMode, window: String(dataWindow) });
     const url = `${window.location.origin}${window.location.pathname}?${params}`;
     try { await navigator.clipboard.writeText(url); window.history.replaceState(null, "", url); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 2200); } catch { setLinkCopied(false); }
+  }
+  function selectCounterPick(id: number) {
+    setHeroId(id);
+    document.getElementById("top")?.scrollIntoView({ behavior: "smooth" });
   }
 
   const matchupWinRate = matchup ? matchup.wins / matchup.matches_played : null;
@@ -300,6 +328,16 @@ export default function Home() {
           <button className="analyze-button" disabled={loading || !enemyIds.length} type="submit">{loading ? t.analyzing : t.analyze}</button>
         </div>
       </form>
+
+      {Boolean(counterPicks.length) && <section className="counterpick-section">
+        <div className="counterpick-heading"><div><div className="eyebrow">{t.counterpickKicker}</div><h2>{t.counterpickTitle} <span>{enemyIds.length > 1 ? t.enemyTeam : carryHero?.name}</span></h2></div><p>{t.counterpickText}</p></div>
+        <div className="counterpick-grid">{counterPicks.map((pick, index) => <article className={pick.hero.id === heroId ? "current" : ""} key={pick.hero.id}>
+          <div className="pick-rank">{index === 0 ? t.bestPick : `#0${index + 1}`}</div>
+          <div className="pick-hero"><HeroPortrait hero={pick.hero} /><div><h3>{pick.hero.name}</h3><small>{pick.coverage}/{enemyIds.length} {t.coverage}</small></div></div>
+          <div className="pick-metrics"><div><small>{t.teamWr}</small><strong>{pct(pick.score)}</strong></div><div><small>{t.carryWr}</small><strong>{pct(pick.carryRate)}</strong></div><div><small>{t.sample}</small><strong>{formatMatches(pick.matches, lang)}</strong></div></div>
+          <button type="button" onClick={() => selectCounterPick(pick.hero.id)} disabled={pick.hero.id === heroId}>{pick.hero.id === heroId ? t.currentPick : `${t.useHero} →`}</button>
+        </article>)}</div>
+      </section>}
 
       <section className="results" aria-live="polite">
         <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {carryHero?.name}</span></h2></div><div className="result-actions"><button className="copy-build" onClick={shareMatchup}>{linkCopied ? t.linkCopied : t.share}</button><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div></div>
