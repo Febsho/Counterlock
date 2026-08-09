@@ -8,6 +8,7 @@ type Lang = "en" | "de";
 type Category = "all" | "weapon" | "vitality" | "spirit";
 type SortMode = "recommended" | "winrate" | "sample" | "cost";
 type Phase = "early" | "mid" | "late";
+type QueueMode = "all" | "ranked" | "unranked";
 
 type Hero = { id: number; name: string; images?: { icon_image_small_webp?: string } };
 type Item = {
@@ -39,13 +40,15 @@ const copy = {
     recommended: "Recommended", winrate: "Win rate", sample: "Sample size", cost: "Cost",
     matchup: "MATCHUP", games: "GAMES", focus: "FOCUS", items: "ITEMS FOUND",
     winrateLabel: "WIN RATE", buyTime: "BUY TIME", vsCarry: "percentage points vs. hero baseline",
-    copyBuild: "COPY TOP BUILD", copied: "BUILD COPIED ✓", empty: "No items match these filters. Try a lower sample size.",
+    copyBuild: "COPY TOP BUILD", copied: "BUILD COPIED ✓", share: "SHARE MATCHUP", linkCopied: "LINK COPIED ✓", empty: "No items match these filters. Try a lower sample size.",
     methodTitle: "How ranking works:", method: "Carry matchup, the full enemy team, your hero baseline and sample confidence are weighted together. Correlation is not a guarantee—adapt to the actual game state.",
     updated: "UPDATED", assetError: "Hero data is temporarily unavailable.", statsError: "Live statistics are temporarily unavailable. Please try again.",
     footer: "Community project · Data by", disclaimer: "· Not affiliated with Valve.", early: "EARLY", mid: "MID GAME", late: "LATE",
     importerTitle: "Import enemy team", importerText: "Upload a match screenshot where the enemy hero names are visible. Recognition runs locally on your device.",
     dropTitle: "Drop match screenshot here", dropText: "or click to choose a PNG, JPG, or WebP", scanning: "READING HERO NAMES", detected: "DETECTED HEROES", confidence: "match",
     importHeroes: "IMPORT SELECTED HEROES", scanAgain: "CHOOSE ANOTHER SCREENSHOT", noHeroes: "No hero names were detected. Try a sharper screenshot with the scoreboard fully visible.", close: "Close screenshot importer", localOnly: "PRIVATE · IMAGE NEVER LEAVES YOUR DEVICE",
+    moreOptions: "MORE OPTIONS", apiFilters: "MATCH DATA", queue: "QUEUE", both: "Ranked + Unranked", ranked: "Ranked only", unranked: "Unranked only", dataWindow: "DATA WINDOW", days: "days", laneOnly: "SAME LANE ONLY",
+    itemRules: "ITEM RULES", maxBudget: "MAX. BUDGET", noLimit: "No limit", itemTier: "ITEM TIER", anyTier: "Any tier", resultCount: "RESULT COUNT", positiveLift: "POSITIVE LIFT ONLY", reanalyzeHint: "Queue, time window, and lane filters apply after Analyze Matchup.",
   },
   de: {
     home: "Counterbuild Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE",
@@ -61,13 +64,15 @@ const copy = {
     recommended: "Empfehlung", winrate: "Winrate", sample: "Stichprobe", cost: "Kosten",
     matchup: "MATCHUP", games: "SPIELE", focus: "FOKUS", items: "ITEMS GEFUNDEN",
     winrateLabel: "WINRATE", buyTime: "KAUFZEIT", vsCarry: "Prozentpunkte gegen die Helden-Basis",
-    copyBuild: "TOP-BUILD KOPIEREN", copied: "BUILD KOPIERT ✓", empty: "Keine Items passen zu diesen Filtern. Versuche eine kleinere Stichprobe.",
+    copyBuild: "TOP-BUILD KOPIEREN", copied: "BUILD KOPIERT ✓", share: "MATCHUP TEILEN", linkCopied: "LINK KOPIERT ✓", empty: "Keine Items passen zu diesen Filtern. Versuche eine kleinere Stichprobe.",
     methodTitle: "So wird gerankt:", method: "Carry-Matchup, gesamtes Gegnerteam, Basis-Winrate deines Helden und Stichprobenqualität werden gewichtet. Korrelation ist keine Garantie—passe den Kauf an den Spielstand an.",
     updated: "AKTUALISIERT", assetError: "Heldendaten sind momentan nicht erreichbar.", statsError: "Die Live-Statistiken sind gerade nicht erreichbar. Bitte versuche es erneut.",
     footer: "Community-Projekt · Daten von", disclaimer: "· Nicht mit Valve verbunden.", early: "EARLY", mid: "MID GAME", late: "LATE",
     importerTitle: "Gegnerteam importieren", importerText: "Lade einen Match-Screenshot hoch, auf dem die gegnerischen Heldennamen sichtbar sind. Die Erkennung läuft lokal auf deinem Gerät.",
     dropTitle: "Match-Screenshot hier ablegen", dropText: "oder klicken, um PNG, JPG oder WebP auszuwählen", scanning: "HELDENNAMEN WERDEN GELESEN", detected: "ERKANNTE HELDEN", confidence: "Treffer",
     importHeroes: "AUSGEWÄHLTE HELDEN IMPORTIEREN", scanAgain: "ANDEREN SCREENSHOT WÄHLEN", noHeroes: "Keine Heldennamen erkannt. Versuche einen schärferen Screenshot mit vollständig sichtbarem Scoreboard.", close: "Screenshot-Import schließen", localOnly: "PRIVAT · DAS BILD BLEIBT AUF DEINEM GERÄT",
+    moreOptions: "MEHR OPTIONEN", apiFilters: "MATCH-DATEN", queue: "WARTESCHLANGE", both: "Ranked + Unranked", ranked: "Nur Ranked", unranked: "Nur Unranked", dataWindow: "ZEITRAUM", days: "Tage", laneOnly: "NUR GLEICHE LANE",
+    itemRules: "ITEM-REGELN", maxBudget: "MAX. BUDGET", noLimit: "Kein Limit", itemTier: "ITEM-TIER", anyTier: "Alle Tiers", resultCount: "ANZAHL ERGEBNISSE", positiveLift: "NUR POSITIVER LIFT", reanalyzeHint: "Warteschlange, Zeitraum und Lane-Filter gelten nach der nächsten Matchup-Analyse.",
   },
 } as const;
 
@@ -125,12 +130,20 @@ export default function Home() {
   const [category, setCategory] = useState<Category>("all");
   const [minSample, setMinSample] = useState(250);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
+  const [queueMode, setQueueMode] = useState<QueueMode>("all");
+  const [dataWindow, setDataWindow] = useState(30);
+  const [laneOnly, setLaneOnly] = useState(false);
+  const [maxBudget, setMaxBudget] = useState(0);
+  const [itemTier, setItemTier] = useState(0);
+  const [resultCount, setResultCount] = useState(8);
+  const [positiveLiftOnly, setPositiveLiftOnly] = useState(false);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [matchup, setMatchup] = useState<CounterStat | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [importerOpen, setImporterOpen] = useState(false);
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [ocrProgress, setOcrProgress] = useState(0);
@@ -148,6 +161,15 @@ export default function Home() {
   useEffect(() => {
     const saved = window.localStorage.getItem("counterbuild-language");
     if (saved === "de" || saved === "en") setLang(saved);
+    const params = new URLSearchParams(window.location.search);
+    const sharedHero = Number(params.get("hero")), sharedCarry = Number(params.get("carry"));
+    const sharedEnemies = (params.get("enemies") ?? "").split(",").map(Number).filter((id) => Number.isFinite(id) && id > 0).slice(0, 6);
+    if (sharedHero) setHeroId(sharedHero);
+    if (sharedEnemies.length) setEnemyIds(sharedEnemies);
+    if (sharedCarry) setCarryId(sharedCarry);
+    const minute = Number(params.get("minute")); if (minute >= 1 && minute <= 40) setGameMinute(minute);
+    const queue = params.get("queue"); if (queue === "ranked" || queue === "unranked") setQueueMode(queue);
+    const windowDays = Number(params.get("window")); if ([7, 30, 90].includes(windowDays)) setDataWindow(windowDays);
   }, []);
 
   useEffect(() => {
@@ -170,12 +192,16 @@ export default function Home() {
     if (!items.length || !enemyIds.length) return;
     setLoading(true); setError(""); setCopied(false);
     try {
-      const common = "min_matches=80&game_mode=normal";
+      const commonParams = new URLSearchParams({ min_matches: "80", game_mode: "normal", min_unix_timestamp: String(Math.floor(Date.now() / 1000) - dataWindow * 86400) });
+      if (queueMode !== "all") commonParams.set("match_mode", queueMode);
+      const common = commonParams.toString();
+      const matchupParams = new URLSearchParams(commonParams); matchupParams.set("same_lane_filter", String(laneOnly));
+      const matchupCommon = matchupParams.toString();
       const [baseStats, teamStats, carryStats, counterStats] = await Promise.all([
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&${common}`).then((r) => r.json()),
-        fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyIds.join(",")}&${common}`).then((r) => r.json()),
-        fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${carryId}&${common}`).then((r) => r.json()),
-        fetch(`${API}/analytics/hero-counter-stats?same_lane_filter=false&min_matches=80&game_mode=normal`).then((r) => r.json()),
+        fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyIds.join(",")}&${matchupCommon}`).then((r) => r.json()),
+        fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${carryId}&${matchupCommon}`).then((r) => r.json()),
+        fetch(`${API}/analytics/hero-counter-stats?${matchupCommon}`).then((r) => r.json()),
       ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[]];
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
@@ -192,15 +218,15 @@ export default function Home() {
       setUpdatedAt(new Date());
     } catch { setError(copy[lang].statsError); }
     finally { setLoading(false); }
-  }, [carryId, enemyIds, heroId, items, lang]);
+  }, [carryId, dataWindow, enemyIds, heroId, items, laneOnly, lang, queueMode]);
 
   useEffect(() => { if (items.length) void analyze(); }, [items]);
 
   const visibleRecommendations = useMemo(() => {
     const [start, end] = phaseRanges[phase];
-    const filtered = recommendations.filter((entry) => entry.buyTime >= start && entry.buyTime <= end && entry.matches >= minSample && (category === "all" || entry.item.item_slot_type === category));
-    return filtered.sort((a, b) => sortMode === "winrate" ? b.carryRate - a.carryRate : sortMode === "sample" ? b.matches - a.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : b.score - a.score).slice(0, 8);
-  }, [category, minSample, phase, recommendations, sortMode]);
+    const filtered = recommendations.filter((entry) => entry.buyTime >= start && entry.buyTime <= end && entry.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || entry.carryRate > entry.baselineRate));
+    return filtered.sort((a, b) => sortMode === "winrate" ? b.carryRate - a.carryRate : sortMode === "sample" ? b.matches - a.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : b.score - a.score).slice(0, resultCount);
+  }, [category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
 
   function addEnemy() { if (enemyToAdd !== heroId && !enemyIds.includes(enemyToAdd) && enemyIds.length < 6) setEnemyIds((current) => [...current, enemyToAdd]); }
   function removeEnemy(id: number) { const next = enemyIds.filter((enemyId) => enemyId !== id); setEnemyIds(next); if (carryId === id && next.length) setCarryId(next[0]); }
@@ -228,6 +254,11 @@ export default function Home() {
   async function copyTopBuild() {
     const text = `${ownHero?.name ?? "Hero"} vs ${carryHero?.name ?? "Carry"}: ${visibleRecommendations.slice(0, 5).map((entry, index) => `${index + 1}. ${entry.item.name}`).join(" · ")}`;
     try { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 2200); } catch { setCopied(false); }
+  }
+  async function shareMatchup() {
+    const params = new URLSearchParams({ hero: String(heroId), enemies: enemyIds.join(","), carry: String(carryId), minute: String(gameMinute), queue: queueMode, window: String(dataWindow) });
+    const url = `${window.location.origin}${window.location.pathname}?${params}`;
+    try { await navigator.clipboard.writeText(url); window.history.replaceState(null, "", url); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 2200); } catch { setLinkCopied(false); }
   }
 
   const matchupWinRate = matchup ? matchup.wins / matchup.matches_played : null;
@@ -271,7 +302,7 @@ export default function Home() {
       </form>
 
       <section className="results" aria-live="polite">
-        <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {carryHero?.name}</span></h2></div><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div>
+        <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {carryHero?.name}</span></h2></div><div className="result-actions"><button className="copy-build" onClick={shareMatchup}>{linkCopied ? t.linkCopied : t.share}</button><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div></div>
 
         <div className="match-context">
           <label className="minute-control"><span><small>{t.currentMinute}</small><strong>{gameMinute}:00</strong></span><input type="range" min="1" max="40" value={gameMinute} onChange={(event) => setGameMinute(Number(event.target.value))} /><div className="phase-tabs">{(["early", "mid", "late"] as Phase[]).map((value) => <button type="button" key={value} className={phase === value ? "active" : ""} onClick={() => setGameMinute(value === "early" ? 7 : value === "mid" ? 15 : 26)}>{t[value]}</button>)}</div></label>
@@ -279,6 +310,15 @@ export default function Home() {
         </div>
 
         <div className="filter-bar"><div className="filter-title">{t.filters}</div><label><small>{t.category}</small><select value={category} onChange={(event) => setCategory(event.target.value as Category)}><option value="all">{t.all}</option><option value="weapon">{t.weapon}</option><option value="vitality">{t.vitality}</option><option value="spirit">{t.spirit}</option></select></label><label><small>{t.minSample}</small><select value={minSample} onChange={(event) => setMinSample(Number(event.target.value))}><option value="80">80+</option><option value="250">250+</option><option value="1000">1K+</option><option value="5000">5K+</option></select></label><label><small>{t.sort}</small><select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}><option value="recommended">{t.recommended}</option><option value="winrate">{t.winrate}</option><option value="sample">{t.sample}</option><option value="cost">{t.cost}</option></select></label></div>
+
+        <details className="advanced-options">
+          <summary><span>＋</span> {t.moreOptions}</summary>
+          <div className="advanced-grid">
+            <section><div className="advanced-title">{t.apiFilters}</div><label><small>{t.queue}</small><select value={queueMode} onChange={(event) => setQueueMode(event.target.value as QueueMode)}><option value="all">{t.both}</option><option value="ranked">{t.ranked}</option><option value="unranked">{t.unranked}</option></select></label><label><small>{t.dataWindow}</small><select value={dataWindow} onChange={(event) => setDataWindow(Number(event.target.value))}><option value="7">7 {t.days}</option><option value="30">30 {t.days}</option><option value="90">90 {t.days}</option></select></label><label className="toggle-option"><input type="checkbox" checked={laneOnly} onChange={(event) => setLaneOnly(event.target.checked)} /><span />{t.laneOnly}</label></section>
+            <section><div className="advanced-title">{t.itemRules}</div><label><small>{t.maxBudget}</small><select value={maxBudget} onChange={(event) => setMaxBudget(Number(event.target.value))}><option value="0">{t.noLimit}</option><option value="800">800</option><option value="1600">1,600</option><option value="3200">3,200</option><option value="6400">6,400</option></select></label><label><small>{t.itemTier}</small><select value={itemTier} onChange={(event) => setItemTier(Number(event.target.value))}><option value="0">{t.anyTier}</option><option value="1">Tier 1</option><option value="2">Tier 2</option><option value="3">Tier 3</option><option value="4">Tier 4</option></select></label></section>
+            <section><div className="advanced-title">OUTPUT</div><label><small>{t.resultCount}</small><select value={resultCount} onChange={(event) => setResultCount(Number(event.target.value))}><option value="4">4</option><option value="8">8</option><option value="12">12</option></select></label><label className="toggle-option"><input type="checkbox" checked={positiveLiftOnly} onChange={(event) => setPositiveLiftOnly(event.target.checked)} /><span />{t.positiveLift}</label><p>{t.reanalyzeHint}</p></section>
+          </div>
+        </details>
 
         {error && <div className="error-card">{error}</div>}
         {!error && loading && <div className="loading-grid">{[1,2,3,4].map((n) => <div key={n} />)}</div>}

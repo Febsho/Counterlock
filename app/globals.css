@@ -105,6 +105,8 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .phase-tabs button.active { background: var(--acid); color: var(--ink); }
 .copy-build { flex: 0 0 auto; border: 1px solid var(--acid); background: transparent; color: var(--acid); padding: 12px 16px; font: 800 9px/1 monospace; letter-spacing: .08em; cursor: pointer; }
 .copy-build:disabled { opacity: .35; cursor: not-allowed; }
+.result-actions { display: flex; gap: 8px; }
+.result-actions .copy-build:first-child { border-color: #77736b; color: #d0cabf; }
 .match-context { display: grid; grid-template-columns: 1.1fr 1fr; gap: 1px; margin-bottom: 1px; background: #4d4b47; border: 1px solid #4d4b47; }
 .minute-control { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px; padding: 16px 18px; background: #242320; }
 .minute-control > span { min-width: 76px; }
@@ -119,6 +121,25 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .filter-bar label { padding-left: 12px; border-left: 1px solid #4d4b47; }
 .filter-bar select { color: var(--paper); font: 800 11px/1 monospace; }
 .filter-bar option { color: var(--ink); }
+.advanced-options { margin: -10px 0 22px; border: 1px solid #4d4b47; background: #22211f; }
+.advanced-options summary { display: flex; align-items: center; gap: 10px; padding: 14px 16px; color: #aaa59c; font: 800 9px/1 monospace; letter-spacing: .13em; cursor: pointer; list-style: none; }
+.advanced-options summary::-webkit-details-marker { display: none; }
+.advanced-options summary span { color: var(--acid); font-size: 16px; transition: transform .2s; }
+.advanced-options[open] summary span { transform: rotate(45deg); }
+.advanced-grid { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid #4d4b47; }
+.advanced-grid section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 16px; border-right: 1px solid #4d4b47; }
+.advanced-grid section:last-child { border-right: 0; }
+.advanced-title { grid-column: 1 / -1; color: var(--acid); font: 800 8px/1 monospace; letter-spacing: .14em; }
+.advanced-grid label { min-width: 0; }
+.advanced-grid select { color: var(--paper); font: 800 11px/1 monospace; border-bottom: 1px solid #54514c; padding: 4px 0 6px; }
+.advanced-grid option { color: var(--ink); }
+.toggle-option { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; color: #b3aea5; font: 800 8px/1 monospace; letter-spacing: .08em; cursor: pointer; }
+.toggle-option input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle-option span { position: relative; width: 30px; height: 16px; border: 1px solid #66625b; background: #33312e; }
+.toggle-option span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; background: #77736b; transition: transform .15s, background .15s; }
+.toggle-option input:checked + span { border-color: var(--acid); }
+.toggle-option input:checked + span::after { background: var(--acid); transform: translateX(14px); }
+.advanced-grid p { grid-column: 1 / -1; margin: 0; color: #77736b; font-size: 9px; line-height: 1.45; }
 .item-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid #4d4b47; }
 .item-card { position: relative; display: grid; grid-template-columns: 34px 58px minmax(130px, 1fr) 75px 68px 72px; align-items: center; gap: 12px; min-height: 112px; padding: 16px 18px 16px 8px; border-bottom: 1px solid #4d4b47; }
 .item-card:nth-child(odd) { border-right: 1px solid #4d4b47; }
@@ -198,6 +219,8 @@ footer a { color: inherit; }
   .item-grid { grid-template-columns: 1fr; }
   .item-card:nth-child(odd) { border-right: 0; }
   .match-context { grid-template-columns: 1fr; }
+  .advanced-grid { grid-template-columns: 1fr; }
+  .advanced-grid section { border-right: 0; border-bottom: 1px solid #4d4b47; }
 }
 
 @media (max-width: 700px) {
@@ -210,6 +233,7 @@ footer a { color: inherit; }
   .carry-block { border-top: 0; }
   .results-heading { align-items: start; flex-direction: column; }
   .copy-build { width: 100%; }
+  .result-actions { width: 100%; flex-direction: column; }
   .phase-tabs { width: 100%; }
   .phase-tabs button { flex: 1; }
   .minute-control { grid-template-columns: 1fr; }
