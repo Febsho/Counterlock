@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const API = "https://api.deadlock-api.com/v1";
 
@@ -33,6 +33,7 @@ const copy = {
     heroText: "Choose your hero, mark the enemy carry, and get item recommendations ranked with real matchup data.",
     yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero", changeHero: "CHANGE HERO", searchHero: "Search heroes…", heroRoster: "HERO ROSTER", heroesAvailable: "heroes available", selectedHero: "SELECTED", enemyPick: "ENEMY PICK", closeHeroPicker: "Close hero picker",
     enemyTeam: "ENEMY TEAM", chooseEnemy: "Choose an enemy", addEnemy: "+ Add enemy", remove: "Remove", importScreen: "IMPORT SCREENSHOT",
+    buildEnemyTeam: "BUILD ENEMY TEAM", enemyRoster: "ENEMY ROSTER", enemySearch: "Search enemy heroes…", teamSelected: "TEAM SELECTED", applyTeam: "APPLY TEAM", cancel: "CANCEL", carryHint: "Click a hero card to mark the enemy carry.", openEnemyPicker: "Open enemy team picker", closeEnemyPicker: "Close enemy team picker", teamSlots: "TEAM SLOTS", ownPick: "YOUR PICK",
     focusTarget: "FOCUS TARGET", enemyCarry: "ENEMY CARRY", matchupWr: "YOUR MATCHUP WR",
     analyze: "ANALYZE MATCHUP →", analyzing: "ANALYZING …",
     liveRec: "LIVE RECOMMENDATION", bestBuys: "Your best buys", against: "against",
@@ -58,6 +59,7 @@ const copy = {
     heroText: "Wähle deinen Helden, markiere den gegnerischen Carry und erhalte Item-Empfehlungen aus echten Matchup-Daten.",
     yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Helden auswählen", changeHero: "HELD WECHSELN", searchHero: "Helden suchen…", heroRoster: "HELDEN-ROSTER", heroesAvailable: "Helden verfügbar", selectedHero: "AUSGEWÄHLT", enemyPick: "GEGNER-PICK", closeHeroPicker: "Heldenauswahl schließen",
     enemyTeam: "GEGNERISCHES TEAM", chooseEnemy: "Gegner auswählen", addEnemy: "+ Gegner", remove: "Entfernen", importScreen: "SCREENSHOT IMPORTIEREN",
+    buildEnemyTeam: "GEGNERTEAM BAUEN", enemyRoster: "GEGNER-ROSTER", enemySearch: "Gegnerische Helden suchen…", teamSelected: "TEAM AUSGEWÄHLT", applyTeam: "TEAM ÜBERNEHMEN", cancel: "ABBRECHEN", carryHint: "Klicke auf eine Heldenkarte, um den gegnerischen Carry zu markieren.", openEnemyPicker: "Gegnerteam-Auswahl öffnen", closeEnemyPicker: "Gegnerteam-Auswahl schließen", teamSlots: "TEAM-PLÄTZE", ownPick: "DEIN PICK",
     focusTarget: "FOKUS-ZIEL", enemyCarry: "GEGNERISCHER CARRY", matchupWr: "DEINE MATCHUP-WR",
     analyze: "MATCHUP ANALYSIEREN →", analyzing: "ANALYSE LÄUFT …",
     liveRec: "LIVE-EMPFEHLUNG", bestBuys: "Deine besten Käufe", against: "gegen",
@@ -128,9 +130,11 @@ export default function Home() {
   const [heroId, setHeroId] = useState(1);
   const [heroPickerOpen, setHeroPickerOpen] = useState(false);
   const [heroSearch, setHeroSearch] = useState("");
+  const [enemyPickerOpen, setEnemyPickerOpen] = useState(false);
+  const [enemySearch, setEnemySearch] = useState("");
+  const [pendingEnemyIds, setPendingEnemyIds] = useState<number[]>([]);
   const [enemyIds, setEnemyIds] = useState<number[]>([13, 3, 6]);
   const [carryId, setCarryId] = useState(13);
-  const [enemyToAdd, setEnemyToAdd] = useState(2);
   const [gameMinute, setGameMinute] = useState(15);
   const [category, setCategory] = useState<Category>("all");
   const [minSample, setMinSample] = useState(250);
@@ -157,8 +161,13 @@ export default function Home() {
   const [ocrComplete, setOcrComplete] = useState(false);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [selectedDetections, setSelectedDetections] = useState<number[]>([]);
+  const enemyRosterRef = useRef<HTMLDivElement>(null);
   const t = copy[lang];
   const phase: Phase = gameMinute < 11 ? "early" : gameMinute < 21 ? "mid" : "late";
+
+  useEffect(() => {
+    if (enemyPickerOpen) requestAnimationFrame(() => { if (enemyRosterRef.current) enemyRosterRef.current.scrollTop = 0; });
+  }, [enemyPickerOpen]);
 
   const heroMap = useMemo(() => new Map(heroes.map((hero) => [hero.id, hero])), [heroes]);
   const ownHero = heroMap.get(heroId);
@@ -259,8 +268,24 @@ export default function Home() {
     return query ? heroes.filter((hero) => hero.name.toLocaleLowerCase(lang).includes(query)) : heroes;
   }, [heroSearch, heroes, lang]);
 
-  function addEnemy() { if (enemyToAdd !== heroId && !enemyIds.includes(enemyToAdd) && enemyIds.length < 6) setEnemyIds((current) => [...current, enemyToAdd]); }
+  const filteredEnemyHeroes = useMemo(() => {
+    const query = enemySearch.trim().toLocaleLowerCase(lang);
+    return query ? heroes.filter((hero) => hero.name.toLocaleLowerCase(lang).includes(query)) : heroes;
+  }, [enemySearch, heroes, lang]);
+
   function removeEnemy(id: number) { const next = enemyIds.filter((enemyId) => enemyId !== id); setEnemyIds(next); if (carryId === id && next.length) setCarryId(next[0]); }
+  function openEnemyPicker() { setPendingEnemyIds(enemyIds); setEnemySearch(""); setEnemyPickerOpen(true); }
+  function closeEnemyPicker() { setEnemyPickerOpen(false); setEnemySearch(""); setPendingEnemyIds([]); }
+  function togglePendingEnemy(id: number) {
+    if (id === heroId) return;
+    setPendingEnemyIds((current) => current.includes(id) ? current.filter((enemyId) => enemyId !== id) : current.length < 6 ? [...current, id] : current);
+  }
+  function applyEnemyTeam() {
+    if (!pendingEnemyIds.length) return;
+    setEnemyIds(pendingEnemyIds);
+    if (!pendingEnemyIds.includes(carryId)) setCarryId(pendingEnemyIds[0]);
+    closeEnemyPicker();
+  }
   function submit(event: FormEvent) { event.preventDefault(); void analyze(); }
   async function readScreenshot(file: File) {
     if (!file.type.startsWith("image/")) return;
@@ -304,8 +329,6 @@ export default function Home() {
   }
 
   const matchupWinRate = matchup ? matchup.wins / matchup.matches_played : null;
-  const availableEnemies = heroes.filter((hero) => hero.id !== heroId && !enemyIds.includes(hero.id));
-
   return (
     <main>
       <header className="site-header">
@@ -332,9 +355,12 @@ export default function Home() {
         </div>
         <div className="step-block enemy-block">
           <div className="step-label"><span>02</span> {t.enemyTeam} <b>{enemyIds.length}/6</b></div>
-          <div className="enemy-list">{enemyIds.map((id) => { const hero = heroMap.get(id); return <div className={`enemy-chip ${id === carryId ? "is-carry" : ""}`} key={id}><button type="button" onClick={() => setCarryId(id)}><HeroPortrait hero={hero} size="small" /><span>{hero?.name}</span>{id === carryId && <b>CARRY</b>}</button><button className="remove-enemy" type="button" onClick={() => removeEnemy(id)} aria-label={`${t.remove} ${hero?.name}`}>×</button></div>; })}</div>
-          <div className="add-enemy"><select value={enemyToAdd} onChange={(event) => setEnemyToAdd(Number(event.target.value))} aria-label={t.chooseEnemy}>{availableEnemies.map((hero) => <option key={hero.id} value={hero.id}>{hero.name}</option>)}</select><button type="button" onClick={addEnemy} disabled={enemyIds.length >= 6}>{t.addEnemy}</button></div>
-          <button className="import-trigger" type="button" onClick={() => setImporterOpen(true)}><span>▣</span> {t.importScreen}</button>
+          <div className="enemy-squad">{enemyIds.map((id, index) => { const hero = heroMap.get(id); const isCarry = id === carryId; return <article className={`enemy-squad-card ${isCarry ? "is-carry" : ""}`} key={id}>
+            <button className="enemy-focus-button" type="button" onClick={() => setCarryId(id)}><HeroPortrait hero={hero} size="small" /><span><small>{isCarry ? t.enemyCarry : `ENEMY 0${index + 1}`}</small><strong>{hero?.name}</strong></span><i>{isCarry ? "★" : "○"}</i></button>
+            <button className="enemy-remove-card" type="button" onClick={() => removeEnemy(id)} aria-label={`${t.remove} ${hero?.name}`}>×</button>
+          </article>; })}{enemyIds.length < 6 && <button className="empty-enemy-slot" type="button" onClick={openEnemyPicker}><span>＋</span><b>{t.addEnemy}</b></button>}</div>
+          <p className="carry-hint"><span>★</span> {t.carryHint}</p>
+          <div className="enemy-tools"><button className="manage-enemy-button" type="button" onClick={openEnemyPicker} aria-label={t.openEnemyPicker}><span>▦</span> {t.buildEnemyTeam}</button><button className="import-trigger" type="button" onClick={() => setImporterOpen(true)}><span>▣</span> {t.importScreen}</button></div>
         </div>
         <div className="step-block carry-block">
           <div className="step-label"><span>03</span> {t.focusTarget}</div>
@@ -381,6 +407,19 @@ export default function Home() {
       </section>
 
       <footer><div className="brand"><span className="brand-mark">CB</span><span><strong>COUNTER</strong>BUILD</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a> {t.disclaimer}</p></footer>
+
+      {enemyPickerOpen && <div className="import-overlay hero-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="enemy-picker-title">
+        <div className="import-modal hero-picker-modal enemy-picker-modal">
+          <button className="modal-close" type="button" onClick={closeEnemyPicker} aria-label={t.closeEnemyPicker}>×</button>
+          <div className="hero-picker-head enemy-picker-head"><div><div className="eyebrow">{t.enemyRoster} · {heroes.length}</div><h2 id="enemy-picker-title">{t.buildEnemyTeam}</h2><p>{pendingEnemyIds.length}/6 {t.teamSelected}</p></div><label className="hero-search"><span>⌕</span><input autoFocus value={enemySearch} onChange={(event) => setEnemySearch(event.target.value)} placeholder={t.enemySearch} /></label></div>
+          <div className="hero-roster-grid enemy-roster-grid" ref={enemyRosterRef}>{filteredEnemyHeroes.map((hero) => { const selected = pendingEnemyIds.includes(hero.id); const ownPick = hero.id === heroId; const selectionIndex = pendingEnemyIds.indexOf(hero.id); return <button className={`${selected ? "team-selected" : ""} ${ownPick ? "enemy" : ""}`} type="button" key={hero.id} onClick={() => togglePendingEnemy(hero.id)} disabled={ownPick} aria-pressed={selected}>
+            <span className="hero-card-art">{hero.images?.icon_hero_card_webp ? <img src={hero.images.icon_hero_card_webp} alt="" /> : <HeroPortrait hero={hero} />}</span>
+            <span className="hero-card-name"><strong>{hero.name}</strong><small>{selected ? `${t.teamSlots} · 0${selectionIndex + 1}` : ownPick ? t.ownPick : `#${String(hero.id).padStart(2, "0")}`}</small></span>
+            {selected && <i>{selectionIndex + 1}</i>}
+          </button>; })}</div>
+          <div className="enemy-picker-actions"><button type="button" onClick={closeEnemyPicker}>{t.cancel}</button><div><span>{pendingEnemyIds.length}</span><small>/ 6 {t.teamSelected}</small></div><button type="button" onClick={applyEnemyTeam} disabled={!pendingEnemyIds.length}>{t.applyTeam} →</button></div>
+        </div>
+      </div>}
 
       {heroPickerOpen && <div className="import-overlay hero-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="hero-picker-title">
         <div className="import-modal hero-picker-modal">
