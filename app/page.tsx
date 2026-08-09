@@ -36,7 +36,7 @@ type CounterPick = { hero: Hero; score: number; carryRate: number; matches: numb
 
 const copy = {
   en: {
-    home: "Counterbuild home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE",
+    home: "CounterForge home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE",
     heroTitleA: "Build for the fight", heroTitleB: "happening right now.",
     heroText: "Choose your hero, mark the enemy carry, and get item recommendations ranked with real matchup data.",
     yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero", changeHero: "CHANGE HERO", searchHero: "Search heroes…", heroRoster: "HERO ROSTER", heroesAvailable: "heroes available", selectedHero: "SELECTED", enemyPick: "ENEMY PICK", closeHeroPicker: "Close hero picker",
@@ -71,7 +71,7 @@ const copy = {
     counterpickKicker: "DRAFT ASSISTANT", counterpickTitle: "Heroes that counter", counterpickText: "Lineup score is normalized against each hero's overall baseline, revealing matchup-specific counters instead of generally strong heroes.", bestPick: "BEST PICK", teamWr: "LINEUP EDGE", carryWr: "VS. CARRY", useHero: "PLAY THIS HERO", coverage: "matchups covered", currentPick: "CURRENT PICK", showAllHeroes: "SHOW ALL HEROES", hideAllHeroes: "HIDE FULL TABLE", heroColumn: "HERO", gamesColumn: "MATCHES",
   },
   de: {
-    home: "Counterbuild Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE",
+    home: "CounterForge Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE",
     heroTitleA: "Baue für den Kampf,", heroTitleB: "der gerade passiert.",
     heroText: "Wähle deinen Helden, markiere den gegnerischen Carry und erhalte Item-Empfehlungen aus echten Matchup-Daten.",
     yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Helden auswählen", changeHero: "HELD WECHSELN", searchHero: "Helden suchen…", heroRoster: "HELDEN-ROSTER", heroesAvailable: "Helden verfügbar", selectedHero: "AUSGEWÄHLT", enemyPick: "GEGNER-PICK", closeHeroPicker: "Heldenauswahl schließen",
@@ -153,7 +153,7 @@ function detectPositionedHeroes(lines: OcrWord[][], heroes: Hero[]): Detection[]
       const similarity = candidate === target ? 1 : 1 - editDistance(target, candidate) / Math.max(target.length, candidate.length, 1);
       if (similarity >= (target.length <= 4 ? .78 : .66) && (!best || similarity > best.confidence)) best = { id: hero.id, confidence: similarity, x: group.reduce((sum, word) => sum + (word.bbox.x0 + word.bbox.x1) / 2, 0) / group.length, y: group.reduce((sum, word) => sum + (word.bbox.y0 + word.bbox.y1) / 2, 0) / group.length };
     } });
-    return best;
+    return best as Detection | null;
   }).filter((entry): entry is Detection => Boolean(entry)).sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
 }
 
@@ -539,7 +539,7 @@ export default function Home() {
   function startHeroDrag(event: DragEvent<HTMLElement>, id: number) { setDraggedHeroId(id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(id)); }
   function finishHeroDrag() { setDraggedHeroId(null); setDragOverLane(null); }
   function dropHero(event: DragEvent<HTMLElement>, value: Exclude<Lane, "all">) { event.preventDefault(); const id = Number(event.dataTransfer.getData("text/plain") || draggedHeroId); if (allMatchHeroIds.includes(id)) updateHeroLane(id, value); finishHeroDrag(); }
-  function moveHeroByKey(event: KeyboardEvent<HTMLElement>, id: number) { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; event.preventDefault(); const lanes = ["yellow", "blue", "green"] as const; const current = lanes.indexOf(laneAssignments[id] ?? "yellow"); const offset = event.key === "ArrowRight" ? 1 : -1; updateHeroLane(id, lanes[(current + offset + lanes.length) % lanes.length]); }
+  function moveHeroByKey(event: KeyboardEvent<HTMLElement>, id: number) { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; event.preventDefault(); const lanes = ["yellow", "blue", "green"] as const; const assigned = laneAssignments[id]; const current = lanes.indexOf(assigned === "purple" ? "yellow" : assigned ?? "yellow"); const offset = event.key === "ArrowRight" ? 1 : -1; updateHeroLane(id, lanes[(current + offset + lanes.length) % lanes.length]); }
   async function readScreenshot(file: File, target: ImportTarget = importTarget) {
     if (!file.type.startsWith("image/")) return;
     if (screenshotUrl) URL.revokeObjectURL(screenshotUrl);
@@ -635,7 +635,7 @@ export default function Home() {
   return (
     <main>
       <header className="site-header">
-        <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CB</span><span><strong>COUNTER</strong>BUILD</span></a>
+        <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CF</span><span><strong>COUNTER</strong>FORGE</span></a>
         <div className="header-actions">
           <div className="live-pill"><span /> LIVE MATCH DATA</div>
           <div className="language-toggle" aria-label="Language / Sprache">
@@ -745,7 +745,7 @@ export default function Home() {
         <div className="method-note"><span>i</span><p><strong>{t.methodTitle}</strong> {t.method}</p>{updatedAt && <time>{t.updated} {updatedAt.toLocaleTimeString(lang === "de" ? "de-DE" : "en-US", { hour: "2-digit", minute: "2-digit" })}</time>}</div>
       </section>
 
-      <footer><div className="brand"><span className="brand-mark">CB</span><span><strong>COUNTER</strong>BUILD</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a> {t.disclaimer}</p></footer>
+      <footer><div className="brand"><span className="brand-mark">CF</span><span><strong>COUNTER</strong>FORGE</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a> {t.disclaimer}</p></footer>
 
       {allyPickerOpen && <div className="import-overlay hero-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="ally-picker-title">
         <div className="import-modal hero-picker-modal ally-picker-modal">
