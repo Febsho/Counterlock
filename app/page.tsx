@@ -50,6 +50,7 @@ const copy = {
     weapon: "Weapon", vitality: "Vitality", spirit: "Spirit", minSample: "MIN. SAMPLE", sort: "SORT BY",
     recommended: "Recommended", buytimeSort: "Buy time", winrate: "Win rate", sample: "Sample size", cost: "Cost",
     laneSetup: "LANE SETUP", lane: "YOUR LANE", laneOpponent: "LANE OPPONENT", anyLane: "Any lane", blue: "Blue", green: "Green", yellow: "Yellow", purple: "Purple",
+    laneBoard: "LANE ASSIGNMENTS", laneBoardText: "Move heroes between lanes. Your hero's lane controls same-lane matchup statistics.", autoPositions: "AUTO BY POSITION", alliesLabel: "YOUR SIDE", enemiesLabel: "ENEMY SIDE", yourLane: "YOUR LANE", markLaneOpponent: "MARK LANE OPPONENT",
     matchup: "MATCHUP", games: "GAMES", focus: "FOCUS", items: "ITEMS FOUND",
     winrateLabel: "WIN RATE", buyTime: "BUY TIME", vsCarry: "percentage points vs. hero baseline",
     copyBuild: "COPY TOP BUILD", copied: "BUILD COPIED ✓", share: "SHARE MATCHUP", linkCopied: "LINK COPIED ✓", empty: "No items match these filters. Try a lower sample size.",
@@ -82,6 +83,7 @@ const copy = {
     weapon: "Waffe", vitality: "Vitalität", spirit: "Spirit", minSample: "MIN. STICHPROBE", sort: "SORTIERUNG",
     recommended: "Empfehlung", buytimeSort: "Kaufzeit", winrate: "Winrate", sample: "Stichprobe", cost: "Kosten",
     laneSetup: "LANE-SETUP", lane: "DEINE LANE", laneOpponent: "LANE-GEGNER", anyLane: "Beliebige Lane", blue: "Blau", green: "Grün", yellow: "Gelb", purple: "Lila",
+    laneBoard: "LANE-ZUORDNUNG", laneBoardText: "Verschiebe Helden zwischen den Lanes. Die Lane deines Helden steuert die Same-Lane-Statistiken.", autoPositions: "AUTO NACH POSITION", alliesLabel: "DEINE SEITE", enemiesLabel: "GEGNERSEITE", yourLane: "DEINE LANE", markLaneOpponent: "ALS LANE-GEGNER MARKIEREN",
     matchup: "MATCHUP", games: "SPIELE", focus: "FOKUS", items: "ITEMS GEFUNDEN",
     winrateLabel: "WINRATE", buyTime: "KAUFZEIT", vsCarry: "Prozentpunkte gegen die Helden-Basis",
     copyBuild: "TOP-BUILD KOPIEREN", copied: "BUILD KOPIERT ✓", share: "MATCHUP TEILEN", linkCopied: "LINK KOPIERT ✓", empty: "Keine Items passen zu diesen Filtern. Versuche eine kleinere Stichprobe.",
@@ -192,6 +194,7 @@ export default function Home() {
   const [laneOnly, setLaneOnly] = useState(false);
   const [lane, setLane] = useState<Lane>("all");
   const [laneOpponentId, setLaneOpponentId] = useState(13);
+  const [laneAssignments, setLaneAssignments] = useState<Record<number, Exclude<Lane, "all">>>({});
   const [maxBudget, setMaxBudget] = useState(0);
   const [itemTier, setItemTier] = useState(0);
   const [resultCount, setResultCount] = useState(8);
@@ -224,6 +227,24 @@ export default function Home() {
   const heroMap = useMemo(() => new Map(heroes.map((hero) => [hero.id, hero])), [heroes]);
   const ownHero = heroMap.get(heroId);
   const carryHero = heroMap.get(carryId);
+  const allyTeamIds = useMemo(() => [heroId, ...allyIds], [allyIds, heroId]);
+  const allMatchHeroIds = useMemo(() => [...allyTeamIds, ...enemyIds], [allyTeamIds, enemyIds]);
+
+  useEffect(() => {
+    setLaneAssignments((current) => {
+      const next: Record<number, Exclude<Lane, "all">> = {};
+      const assignMissing = (ids: number[]) => ids.forEach((id, index) => { next[id] = current[id] ?? (index < 2 ? "yellow" : index < 4 ? "blue" : "green"); });
+      assignMissing(allyTeamIds); assignMissing(enemyIds);
+      return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+    });
+  }, [allyTeamIds, enemyIds]);
+
+  useEffect(() => {
+    const ownLane = laneAssignments[heroId]; if (!ownLane) return;
+    setLane(ownLane); setLaneOnly(true);
+    const laneEnemies = enemyIds.filter((id) => laneAssignments[id] === ownLane);
+    if (laneEnemies.length && !laneEnemies.includes(laneOpponentId)) setLaneOpponentId(laneEnemies[0]);
+  }, [enemyIds, heroId, laneAssignments, laneOpponentId]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("counterbuild-language");
@@ -390,6 +411,12 @@ export default function Home() {
   function removeAlly(id: number) { setAllyIds((current) => current.filter((allyId) => allyId !== id)); }
   function openImporter(target: ImportTarget) { setImportTarget(target); setImporterOpen(true); }
   function selectLane(value: Lane) { setLane(value); setLaneOnly(value !== "all"); }
+  function autoAssignLanes() {
+    const next: Record<number, Exclude<Lane, "all">> = {};
+    const assign = (ids: number[]) => ids.forEach((id, index) => { next[id] = index < 2 ? "yellow" : index < 4 ? "blue" : "green"; });
+    assign(allyTeamIds); assign(enemyIds); setLaneAssignments(next);
+  }
+  function updateHeroLane(id: number, value: Exclude<Lane, "all">) { setLaneAssignments((current) => ({ ...current, [id]: value })); }
   async function readScreenshot(file: File, target: ImportTarget = importTarget) {
     if (!file.type.startsWith("image/")) return;
     if (screenshotUrl) URL.revokeObjectURL(screenshotUrl);
@@ -418,6 +445,7 @@ export default function Home() {
       const enemies = selected.filter((entry) => entry.side === "enemy").map((entry) => entry.id).slice(0, 6);
       if (allies.length) setAllyIds(allies);
       if (enemies.length) { setEnemyIds(enemies); if (!enemies.includes(carryId)) setCarryId(enemies[0]); }
+      const detectedAssignments: Record<number, Exclude<Lane, "all">> = {}; selected.forEach((entry) => { if (entry.lane) detectedAssignments[entry.id] = entry.lane; }); if (Object.keys(detectedAssignments).length) setLaneAssignments(detectedAssignments);
       const ownDetection = selected.find((entry) => entry.id === heroId); const detectedLane = ownDetection?.lane;
       if (detectedLane) { selectLane(detectedLane); const opponent = selected.find((entry) => entry.side === "enemy" && entry.lane === detectedLane); if (opponent) setLaneOpponentId(opponent.id); }
     }
@@ -495,10 +523,14 @@ export default function Home() {
         <div className="step-block carry-block">
           <div className="step-label"><span>04</span> {t.focusTarget}</div>
           <div className="carry-card"><HeroPortrait hero={carryHero} /><div><small>{t.enemyCarry}</small><strong>{carryHero?.name ?? "–"}</strong></div>{matchupWinRate !== null && <div className="threat"><small>{t.matchupWr}</small><strong>{pct(matchupWinRate)}</strong></div>}</div>
-          <div className="lane-setup"><small>{t.laneSetup}</small><div className="lane-buttons">{(["all", "blue", "green", "yellow", "purple"] as Lane[]).map((value) => <button className={`${lane === value ? "active" : ""} lane-${value}`} type="button" key={value} onClick={() => selectLane(value)}>{value === "all" ? "×" : ""}<span>{t[value === "all" ? "anyLane" : value]}</span></button>)}</div><label><span>{t.laneOpponent}</span><select value={laneOpponentId} onChange={(event) => setLaneOpponentId(Number(event.target.value))}>{enemyIds.map((id) => <option key={id} value={id}>{heroMap.get(id)?.name}</option>)}</select></label></div>
           <div className={`auto-update-status ${loading ? "updating" : ""}`}><span /><div><strong>{loading ? t.autoUpdating : t.autoLive}</strong><small>{t.autoHint}</small></div></div>
         </div>
       </div>
+
+      <section className="lane-board">
+        <div className="lane-board-head"><div><div className="eyebrow">05 · {t.laneSetup} · {allMatchHeroIds.length}/12</div><h2>{t.laneBoard}</h2><p>{t.laneBoardText}</p></div><div className="lane-board-actions"><span><small>{t.yourLane}</small><strong className={`lane-text-${lane}`}>{lane === "all" ? t.anyLane : t[lane]}</strong></span><button type="button" onClick={autoAssignLanes}>{t.autoPositions}</button></div></div>
+        <div className="lane-columns">{(["yellow", "blue", "green"] as const).map((laneKey) => { const allyLane = allyTeamIds.filter((id) => laneAssignments[id] === laneKey); const enemyLane = enemyIds.filter((id) => laneAssignments[id] === laneKey); return <section className={`lane-column lane-column-${laneKey}`} key={laneKey}><div className="lane-column-title"><span /><strong>{t[laneKey]} {lang === "de" ? "LANE" : "LANE"}</strong><b>{allyLane.length}v{enemyLane.length}</b></div><div className="lane-side ally-side"><small>{t.alliesLabel}</small>{allyLane.map((id) => { const hero = heroMap.get(id); return <article className={id === heroId ? "is-you" : ""} key={id}><HeroPortrait hero={hero} size="small" /><span><small>{id === heroId ? t.ownPick : t.allyPick}</small><strong>{hero?.name}</strong></span><select value={laneAssignments[id]} onChange={(event) => updateHeroLane(id, event.target.value as Exclude<Lane, "all">)} aria-label={`${t.lane} ${hero?.name}`}><option value="yellow">Y</option><option value="blue">B</option><option value="green">G</option></select></article>; })}</div><div className="lane-versus">VS</div><div className="lane-side enemy-side"><small>{t.enemiesLabel}</small>{enemyLane.map((id) => { const hero = heroMap.get(id); const isOpponent = id === laneOpponentId; return <article className={isOpponent ? "is-opponent" : ""} key={id}><HeroPortrait hero={hero} size="small" /><span><small>{isOpponent ? t.laneOpponent : t.enemyPick}</small><strong>{hero?.name}</strong></span><button type="button" onClick={() => setLaneOpponentId(id)} title={t.markLaneOpponent}>{isOpponent ? "◆" : "◇"}</button><select value={laneAssignments[id]} onChange={(event) => updateHeroLane(id, event.target.value as Exclude<Lane, "all">)} aria-label={`${t.lane} ${hero?.name}`}><option value="yellow">Y</option><option value="blue">B</option><option value="green">G</option></select></article>; })}</div></section>; })}</div>
+      </section>
 
       {Boolean(counterPicks.length) && <section className="counterpick-section">
         <div className="counterpick-heading"><div><div className="eyebrow">{t.counterpickKicker}</div><h2>{t.counterpickTitle} <span>{enemyIds.length > 1 ? t.enemyTeam : carryHero?.name}</span></h2></div><p>{t.counterpickText}</p></div>
