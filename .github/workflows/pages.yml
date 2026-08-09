@@ -1,4 +1,4 @@
-name: Deploy CounterForge to GitHub Pages
+name: Deploy Counterlock to GitHub Pages
 
 on:
   push:

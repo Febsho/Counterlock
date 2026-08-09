@@ -1,6 +1,6 @@
-# Deadlock CounterForge
+# Deadlock Counterlock
 
-Deadlock CounterForge is a data-driven match assistant for drafting, lane setup, counter picks, and item builds.
+Deadlock Counterlock is a data-driven match assistant for drafting, lane setup, counter picks, and item builds.
 
 ## Features
 
@@ -15,7 +15,7 @@ Deadlock CounterForge is a data-driven match assistant for drafting, lane setup,
 
 ## Live website
 
-[Open Deadlock CounterForge](https://febsho.github.io/deadlock-counterforge/)
+[Open Deadlock Counterlock](https://febsho.github.io/deadlock-counterlock/)
 
 ## Development
 
@@ -35,7 +35,7 @@ npm run build
 Create the static GitHub Pages export:
 
 ```bash
-GITHUB_REPOSITORY=Febsho/deadlock-counterforge npm run build:pages
+GITHUB_REPOSITORY=Febsho/deadlock-counterlock npm run build:pages
 ```
 
 ## Data and privacy

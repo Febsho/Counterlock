@@ -10,17 +10,17 @@ const socialImage = `${siteUrl.replace(/\/$/, "")}/og.png`;
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "Deadlock CounterForge — Matchup & Build Intelligence",
+  title: "Deadlock Counterlock — Matchup & Build Intelligence",
   description: "Data-driven Deadlock counter picks, lane matchups, item recommendations, and full builds.",
   openGraph: {
-    title: "Deadlock CounterForge",
+    title: "Deadlock Counterlock",
     description: "Forge a better Deadlock draft, lane, and item build with live matchup data.",
     type: "website",
-    images: [{ url: socialImage, width: 1200, height: 630, alt: "Deadlock CounterForge matchup intelligence" }],
+    images: [{ url: socialImage, width: 1200, height: 630, alt: "Deadlock Counterlock matchup intelligence" }],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Deadlock CounterForge",
+    title: "Deadlock Counterlock",
     description: "Counter picks, lane matchups, and item builds powered by live Deadlock data.",
     images: [socialImage],
   },
