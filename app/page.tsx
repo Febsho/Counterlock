@@ -31,6 +31,7 @@ type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: numb
 type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[] };
 type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all">; isOwn?: boolean };
 type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
+type ScoreboardSheet = { canvas: HTMLCanvasElement; rowHeight: number };
 type CounterPick = { hero: Hero; score: number; carryRate: number; matches: number; coverage: number };
 
 const copy = {
@@ -152,6 +153,87 @@ function detectPositionedHeroes(lines: OcrWord[][], heroes: Hero[]): Detection[]
     } });
     return best;
   }).filter((entry): entry is Detection => Boolean(entry)).sort((a, b) => (a.y ?? 0) - (b.y ?? 0));
+}
+
+async function createScoreboardSheet(file: File): Promise<ScoreboardSheet | null> {
+  let bitmap: ImageBitmap;
+  try { bitmap = await createImageBitmap(file); } catch { return null; }
+  try {
+    if (bitmap.width / bitmap.height < 2.6) return null;
+    const cardWidth = Math.max(48, Math.round(bitmap.width * .07));
+    const cardHeight = Math.max(36, Math.round(bitmap.height * .151));
+    const cardY = Math.round(bitmap.height * .345);
+    const scale = 5, gap = 40, rowHeight = cardHeight * scale + gap;
+    const canvas = document.createElement("canvas");
+    canvas.width = cardWidth * scale; canvas.height = rowHeight * 12;
+    const output = canvas.getContext("2d", { willReadFrequently: true });
+    if (!output) return null;
+    output.fillStyle = "white"; output.fillRect(0, 0, canvas.width, canvas.height); output.imageSmoothingEnabled = false;
+
+    for (let slot = 0; slot < 12; slot += 1) {
+      const sideOffset = slot < 6 ? 0 : bitmap.width * .58;
+      const sideSlot = slot % 6;
+      const cardX = Math.round(sideOffset + sideSlot * bitmap.width * .07);
+      const source = document.createElement("canvas"); source.width = cardWidth; source.height = cardHeight;
+      const context = source.getContext("2d", { willReadFrequently: true });
+      if (!context) continue;
+      context.drawImage(bitmap, cardX, cardY, cardWidth, cardHeight, 0, 0, cardWidth, cardHeight);
+      const image = context.getImageData(0, 0, cardWidth, cardHeight);
+      const gray = new Uint8Array(cardWidth * cardHeight);
+      for (let pixel = 0; pixel < gray.length; pixel += 1) {
+        const offset = pixel * 4;
+        gray[pixel] = Math.round(image.data[offset] * .299 + image.data[offset + 1] * .587 + image.data[offset + 2] * .114);
+      }
+      const integral = new Uint32Array((cardWidth + 1) * (cardHeight + 1));
+      for (let y = 0; y < cardHeight; y += 1) {
+        let rowSum = 0;
+        for (let x = 0; x < cardWidth; x += 1) {
+          rowSum += gray[y * cardWidth + x];
+          integral[(y + 1) * (cardWidth + 1) + x + 1] = integral[y * (cardWidth + 1) + x + 1] + rowSum;
+        }
+      }
+      const radius = 3;
+      for (let y = 0; y < cardHeight; y += 1) for (let x = 0; x < cardWidth; x += 1) {
+        const x0 = Math.max(0, x - radius), x1 = Math.min(cardWidth - 1, x + radius);
+        const y0 = Math.max(0, y - radius), y1 = Math.min(cardHeight - 1, y + radius);
+        const stride = cardWidth + 1;
+        const sum = integral[(y1 + 1) * stride + x1 + 1] - integral[y0 * stride + x1 + 1] - integral[(y1 + 1) * stride + x0] + integral[y0 * stride + x0];
+        const mean = sum / ((x1 - x0 + 1) * (y1 - y0 + 1));
+        const value = gray[y * cardWidth + x] > mean + 8 ? 0 : 255;
+        const offset = (y * cardWidth + x) * 4;
+        image.data[offset] = value; image.data[offset + 1] = value; image.data[offset + 2] = value; image.data[offset + 3] = 255;
+      }
+      context.putImageData(image, 0, 0);
+      output.drawImage(source, 0, slot * rowHeight, canvas.width, cardHeight * scale);
+    }
+    return { canvas, rowHeight };
+  } finally { bitmap.close(); }
+}
+
+function detectScoreboardRows(words: OcrWord[], heroes: Hero[], rowHeight: number, ownHeroId: number): Detection[] {
+  const used = new Set<number>(); const found: Detection[] = [];
+  for (let slot = 0; slot < 12; slot += 1) {
+    const rowWords = words.filter((word) => {
+      const center = (word.bbox.y0 + word.bbox.y1) / 2;
+      return center >= slot * rowHeight && center < (slot + 1) * rowHeight;
+    }).map((word) => normalizeText(word.text)).filter(Boolean);
+    let best: { hero: Hero; confidence: number } | null = null;
+    for (const hero of heroes) {
+      if (used.has(hero.id)) continue;
+      const target = normalizeText(hero.name); let confidence = 0;
+      for (let size = 1; size <= Math.min(3, rowWords.length); size += 1) for (let index = 0; index <= rowWords.length - size; index += 1) {
+        const candidate = rowWords.slice(index, index + size).join("");
+        const similarity = candidate === target ? 1 : 1 - editDistance(target, candidate) / Math.max(target.length, candidate.length, 1);
+        confidence = Math.max(confidence, similarity);
+      }
+      if (confidence >= (target.length <= 4 ? .72 : .66) && (!best || confidence > best.confidence)) best = { hero, confidence };
+    }
+    if (!best) continue;
+    used.add(best.hero.id);
+    const index = slot % 6;
+    found.push({ id: best.hero.id, confidence: best.confidence, x: slot < 6 ? index : index + 8, y: 0, side: slot < 6 ? "ally" : "enemy", isOwn: slot < 6 && best.hero.id === ownHeroId, lane: index < 2 ? "yellow" : index < 4 ? "blue" : "green" });
+  }
+  return found;
 }
 
 function classifyScoreboard(detections: Detection[], ownHeroId: number): Detection[] {
@@ -427,14 +509,27 @@ export default function Home() {
     setScreenshotUrl(URL.createObjectURL(file)); setOcrRunning(true); setOcrComplete(false); setOcrProgress(0); setDetections([]); setSelectedDetections([]);
     let worker: Awaited<ReturnType<typeof import("tesseract.js")["createWorker"]>> | null = null;
     try {
-      const { createWorker } = await import("tesseract.js");
+      const { createWorker, PSM } = await import("tesseract.js");
       worker = await createWorker("eng", 1, { logger: (message) => { if (message.status === "recognizing text") setOcrProgress(Math.round(message.progress * 100)); } });
-      const result = await worker.recognize(file, {}, { blocks: true });
       const excluded = target === "ally" ? [heroId, ...enemyIds] : target === "enemy" ? [heroId, ...allyIds] : [];
       const limit = target === "auto" ? 12 : target === "ally" ? 5 : 6;
-      const lines = (result.data.blocks ?? []).flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines.map((line) => line.words as OcrWord[])));
-      const positioned = classifyScoreboard(detectPositionedHeroes(lines, heroes), heroId);
-      const found = (positioned.length >= 2 ? positioned : detectHeroNames(result.data.text, heroes, excluded)).filter((entry) => !excluded.includes(entry.id)).slice(0, limit);
+      const sheet = await createScoreboardSheet(file);
+      let found: Detection[] = [];
+      if (sheet) {
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
+        const result = await worker.recognize(sheet.canvas, {}, { blocks: true });
+        const words = (result.data.blocks ?? []).flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines.flatMap((line) => line.words as OcrWord[])));
+        found = detectScoreboardRows(words, heroes, sheet.rowHeight, heroId);
+      }
+      if (found.length < 8) {
+        await worker.setParameters({ tessedit_pageseg_mode: PSM.AUTO });
+        const result = await worker.recognize(file, {}, { blocks: true });
+        const lines = (result.data.blocks ?? []).flatMap((block) => block.paragraphs.flatMap((paragraph) => paragraph.lines.map((line) => line.words as OcrWord[])));
+        const positioned = classifyScoreboard(detectPositionedHeroes(lines, heroes), heroId);
+        const fallback = positioned.length >= 2 ? positioned : detectHeroNames(result.data.text, heroes, excluded);
+        const existing = new Set(found.map((entry) => entry.id)); found = [...found, ...fallback.filter((entry) => !existing.has(entry.id))];
+      }
+      found = found.filter((entry) => !excluded.includes(entry.id)).slice(0, limit);
       setDetections(found); setSelectedDetections(found.slice(0, limit).map((entry) => entry.id)); setOcrComplete(true);
     } catch { setDetections([]); setOcrComplete(true); }
     finally { if (worker) await worker.terminate(); setOcrRunning(false); }
