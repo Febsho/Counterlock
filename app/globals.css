@@ -169,6 +169,21 @@ select { width: 100%; border: 0; background: transparent; color: var(--ink); fon
 .counterpick-grid article:first-child .pick-metrics strong:first-of-type { color: #2b4312; }
 .counterpick-grid article > button { width: 100%; margin-top: 14px; padding: 10px 8px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); font: 900 8px/1 monospace; letter-spacing: .05em; cursor: pointer; }
 .counterpick-grid article > button:disabled { background: transparent; color: var(--ink); cursor: default; }
+.show-all-counters { width: 100%; min-height: 44px; margin-top: 12px; border: 2px solid var(--ink); background: var(--ink); color: var(--acid); font: 900 9px/1 monospace; letter-spacing: .1em; cursor: pointer; }
+.counter-table { margin-top: 10px; border: 2px solid var(--ink); background: #f5f0e5; }
+.counter-table-head, .counter-table-row { display: grid; grid-template-columns: 42px minmax(180px, 1.4fr) repeat(4, minmax(90px, .7fr)) 52px; align-items: center; }
+.counter-table-head { min-height: 36px; background: var(--ink); color: #aaa59c; font: 900 7px/1 monospace; letter-spacing: .1em; }
+.counter-table-head > *, .counter-table-row > * { min-width: 0; padding: 8px 12px; border-right: 1px solid #b8b1a5; }
+.counter-table-head > * { border-right-color: #45433f; }
+.counter-table-row { min-height: 56px; border-bottom: 1px solid #b8b1a5; }
+.counter-table-row:last-child { border-bottom: 0; }
+.counter-table-row > b { color: #777168; font: 900 9px/1 monospace; }
+.counter-table-row > div { display: flex; align-items: center; gap: 9px; }
+.counter-table-row .portrait { width: 34px; height: 34px; }
+.counter-table-row > strong { font: 900 13px/1 monospace; }
+.counter-table-row > span { font: 800 10px/1 monospace; }
+.counter-table-row > button { align-self: stretch; border: 0; background: transparent; font-weight: 900; cursor: pointer; }
+.counter-table-row > button:hover:not(:disabled) { background: var(--acid); }
 
 .results { padding: 62px clamp(20px, 7vw, 108px) 70px; background: var(--ink); color: var(--paper); }
 .results-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
@@ -230,6 +245,18 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .full-build-head .eyebrow { margin-bottom: 9px; color: var(--acid); }
 .full-build-head h3 { margin: 0; font-size: 24px; letter-spacing: -.04em; text-transform: uppercase; }
 .full-build-head p { margin: 7px 0 0; color: #918c83; font-size: 11px; }
+.final-inventory { display: grid; grid-template-columns: 150px repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #4d4b47; background: #181816; }
+.final-inventory-title { display: flex; align-items: center; padding: 14px; color: var(--acid); font: 900 9px/1.35 monospace; letter-spacing: .08em; }
+.inventory-group { padding: 10px; border-left: 1px solid #4d4b47; }
+.inventory-group > strong { display: block; margin-bottom: 7px; color: #aaa59c; font: 900 7px/1 monospace; letter-spacing: .08em; text-transform: uppercase; }
+.inventory-group > div { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.inventory-group span { position: relative; display: grid; place-items: center; aspect-ratio: 1; min-width: 0; border: 1px solid #484540; background: #292824; }
+.inventory-group.weapon span { border-top: 2px solid var(--weapon); }
+.inventory-group.vitality span { border-top: 2px solid var(--vitality); }
+.inventory-group.spirit span { border-top: 2px solid var(--spirit); }
+.inventory-group.flex span { border-top: 2px solid var(--acid); }
+.inventory-group img { width: 84%; height: 84%; object-fit: contain; }
+.inventory-group b { position: absolute; right: 2px; bottom: 2px; padding: 2px; background: #11110fd9; color: var(--paper); font: 900 6px/1 monospace; }
 .build-enemy-lineup { display: flex; flex-direction: row-reverse; padding-left: 18px; }
 .build-enemy-lineup > span { margin-left: -8px; border: 2px solid #20201d; filter: grayscale(.3); }
 .build-enemy-lineup > span.carry { z-index: 2; border-color: var(--red); }
@@ -423,6 +450,8 @@ footer a { color: inherit; }
   .counterpick-grid article { border-right: 0; border-bottom: 1px solid var(--ink); }
   .counterpick-grid article:nth-child(2) { border-right: 0; }
   .counterpick-grid article:last-child { border-bottom: 0; }
+  .counter-table { overflow-x: auto; }
+  .counter-table-head, .counter-table-row { min-width: 760px; }
   .results-heading { align-items: start; flex-direction: column; }
   .result-controls { width: 100%; justify-items: stretch; }
   .buy-target-switch { width: 100%; min-width: 0; }
@@ -430,6 +459,8 @@ footer a { color: inherit; }
   .copy-build { width: 100%; }
   .result-actions { width: 100%; flex-direction: column; }
   .full-build-head { align-items: flex-start; flex-direction: column; }
+  .final-inventory { grid-template-columns: 1fr 1fr; }
+  .final-inventory-title { grid-column: 1 / -1; }
   .build-enemy-lineup { flex-direction: row; padding-left: 0; }
   .build-timeline { grid-template-columns: repeat(3, 285px); }
   .sell-plan { grid-template-columns: 1fr; }
