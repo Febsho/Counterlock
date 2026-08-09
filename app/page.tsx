@@ -6,10 +6,12 @@ const API = "https://api.deadlock-api.com/v1";
 
 type Lang = "en" | "de";
 type Category = "all" | "weapon" | "vitality" | "spirit";
-type SortMode = "recommended" | "winrate" | "sample" | "cost";
+type SortMode = "buytime" | "recommended" | "winrate" | "sample" | "cost";
 type Phase = "early" | "mid" | "late";
 type QueueMode = "all" | "ranked" | "unranked";
 type BuyTarget = "carry" | "team";
+type Lane = "all" | "blue" | "green" | "yellow" | "purple";
+type ImportTarget = "enemy" | "ally";
 
 type Hero = { id: number; name: string; images?: { icon_image_small_webp?: string; icon_hero_card_webp?: string } };
 type Item = {
@@ -36,13 +38,15 @@ const copy = {
     yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero", changeHero: "CHANGE HERO", searchHero: "Search heroes…", heroRoster: "HERO ROSTER", heroesAvailable: "heroes available", selectedHero: "SELECTED", enemyPick: "ENEMY PICK", closeHeroPicker: "Close hero picker",
     enemyTeam: "ENEMY TEAM", chooseEnemy: "Choose an enemy", addEnemy: "+ Add enemy", remove: "Remove", importScreen: "IMPORT SCREENSHOT",
     buildEnemyTeam: "BUILD ENEMY TEAM", enemyRoster: "ENEMY ROSTER", enemySearch: "Search enemy heroes…", teamSelected: "TEAM SELECTED", applyTeam: "APPLY TEAM", cancel: "CANCEL", carryHint: "Click a hero card to mark the enemy carry.", openEnemyPicker: "Open enemy team picker", closeEnemyPicker: "Close enemy team picker", teamSlots: "TEAM SLOTS", ownPick: "YOUR PICK",
+    yourTeam: "YOUR TEAM", buildOwnTeam: "BUILD YOUR TEAM", allyRoster: "ALLY ROSTER", allySearch: "Search allied heroes…", alliesSelected: "ALLIES SELECTED", applyAllies: "APPLY ALLIES", openAllyPicker: "Open allied team picker", closeAllyPicker: "Close allied team picker", importAllies: "IMPORT ALLIES", allyPick: "ALLY PICK",
     focusTarget: "FOCUS TARGET", enemyCarry: "ENEMY CARRY", matchupWr: "YOUR MATCHUP WR",
     analyze: "ANALYZE MATCHUP →", analyzing: "ANALYZING …",
     liveRec: "LIVE RECOMMENDATION", bestBuys: "Your best buys", against: "against", enemyLineup: "the full enemy team", vsCarryMode: "VS CARRY", vsTeamMode: "VS TEAM", buyTarget: "RECOMMENDATION TARGET", vsTeam: "percentage points vs. hero baseline across the team",
     autoLive: "LIVE · AUTO-UPDATES", autoUpdating: "UPDATING MATCHUP …", autoHint: "Changes refresh instantly",
     currentMinute: "CURRENT MINUTE", filters: "SMART FILTERS", category: "CATEGORY", all: "All",
     weapon: "Weapon", vitality: "Vitality", spirit: "Spirit", minSample: "MIN. SAMPLE", sort: "SORT BY",
-    recommended: "Recommended", winrate: "Win rate", sample: "Sample size", cost: "Cost",
+    recommended: "Recommended", buytimeSort: "Buy time", winrate: "Win rate", sample: "Sample size", cost: "Cost",
+    laneSetup: "LANE SETUP", lane: "YOUR LANE", laneOpponent: "LANE OPPONENT", anyLane: "Any lane", blue: "Blue", green: "Green", yellow: "Yellow", purple: "Purple",
     matchup: "MATCHUP", games: "GAMES", focus: "FOCUS", items: "ITEMS FOUND",
     winrateLabel: "WIN RATE", buyTime: "BUY TIME", vsCarry: "percentage points vs. hero baseline",
     copyBuild: "COPY TOP BUILD", copied: "BUILD COPIED ✓", share: "SHARE MATCHUP", linkCopied: "LINK COPIED ✓", empty: "No items match these filters. Try a lower sample size.",
@@ -51,6 +55,7 @@ const copy = {
     updated: "UPDATED", assetError: "Hero data is temporarily unavailable.", statsError: "Live statistics are temporarily unavailable. Please try again.",
     footer: "Community project · Data by", disclaimer: "· Not affiliated with Valve.", early: "EARLY", mid: "MID GAME", late: "LATE",
     importerTitle: "Import enemy team", importerText: "Upload a match screenshot where the enemy hero names are visible. Recognition runs locally on your device.",
+    allyImporterText: "Upload a scoreboard screenshot and select the heroes on your side. Recognition runs locally on your device.",
     dropTitle: "Drop match screenshot here", dropText: "or click to choose a PNG, JPG, or WebP", scanning: "READING HERO NAMES", detected: "DETECTED HEROES", confidence: "match",
     importHeroes: "IMPORT SELECTED HEROES", scanAgain: "CHOOSE ANOTHER SCREENSHOT", noHeroes: "No hero names were detected. Try a sharper screenshot with the scoreboard fully visible.", close: "Close screenshot importer", localOnly: "PRIVATE · IMAGE NEVER LEAVES YOUR DEVICE",
     moreOptions: "MORE OPTIONS", apiFilters: "MATCH DATA", queue: "QUEUE", both: "Ranked + Unranked", ranked: "Ranked only", unranked: "Unranked only", dataWindow: "DATA WINDOW", days: "days", laneOnly: "SAME LANE ONLY",
@@ -64,13 +69,15 @@ const copy = {
     yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Helden auswählen", changeHero: "HELD WECHSELN", searchHero: "Helden suchen…", heroRoster: "HELDEN-ROSTER", heroesAvailable: "Helden verfügbar", selectedHero: "AUSGEWÄHLT", enemyPick: "GEGNER-PICK", closeHeroPicker: "Heldenauswahl schließen",
     enemyTeam: "GEGNERISCHES TEAM", chooseEnemy: "Gegner auswählen", addEnemy: "+ Gegner", remove: "Entfernen", importScreen: "SCREENSHOT IMPORTIEREN",
     buildEnemyTeam: "GEGNERTEAM BAUEN", enemyRoster: "GEGNER-ROSTER", enemySearch: "Gegnerische Helden suchen…", teamSelected: "TEAM AUSGEWÄHLT", applyTeam: "TEAM ÜBERNEHMEN", cancel: "ABBRECHEN", carryHint: "Klicke auf eine Heldenkarte, um den gegnerischen Carry zu markieren.", openEnemyPicker: "Gegnerteam-Auswahl öffnen", closeEnemyPicker: "Gegnerteam-Auswahl schließen", teamSlots: "TEAM-PLÄTZE", ownPick: "DEIN PICK",
+    yourTeam: "DEIN TEAM", buildOwnTeam: "EIGENES TEAM BAUEN", allyRoster: "VERBÜNDETEN-ROSTER", allySearch: "Verbündete Helden suchen…", alliesSelected: "VERBÜNDETE AUSGEWÄHLT", applyAllies: "VERBÜNDETE ÜBERNEHMEN", openAllyPicker: "Verbündetenauswahl öffnen", closeAllyPicker: "Verbündetenauswahl schließen", importAllies: "VERBÜNDETE IMPORTIEREN", allyPick: "VERBÜNDETER",
     focusTarget: "FOKUS-ZIEL", enemyCarry: "GEGNERISCHER CARRY", matchupWr: "DEINE MATCHUP-WR",
     analyze: "MATCHUP ANALYSIEREN →", analyzing: "ANALYSE LÄUFT …",
     liveRec: "LIVE-EMPFEHLUNG", bestBuys: "Deine besten Käufe", against: "gegen", enemyLineup: "das gesamte Gegnerteam", vsCarryMode: "GEGEN CARRY", vsTeamMode: "GEGEN TEAM", buyTarget: "EMPFEHLUNGSZIEL", vsTeam: "Prozentpunkte gegen die Helden-Basis im gesamten Team",
     autoLive: "LIVE · AUTO-UPDATE", autoUpdating: "MATCHUP WIRD AKTUALISIERT …", autoHint: "Änderungen werden sofort übernommen",
     currentMinute: "AKTUELLE MINUTE", filters: "INTELLIGENTE FILTER", category: "KATEGORIE", all: "Alle",
     weapon: "Waffe", vitality: "Vitalität", spirit: "Spirit", minSample: "MIN. STICHPROBE", sort: "SORTIERUNG",
-    recommended: "Empfehlung", winrate: "Winrate", sample: "Stichprobe", cost: "Kosten",
+    recommended: "Empfehlung", buytimeSort: "Kaufzeit", winrate: "Winrate", sample: "Stichprobe", cost: "Kosten",
+    laneSetup: "LANE-SETUP", lane: "DEINE LANE", laneOpponent: "LANE-GEGNER", anyLane: "Beliebige Lane", blue: "Blau", green: "Grün", yellow: "Gelb", purple: "Lila",
     matchup: "MATCHUP", games: "SPIELE", focus: "FOKUS", items: "ITEMS GEFUNDEN",
     winrateLabel: "WINRATE", buyTime: "KAUFZEIT", vsCarry: "Prozentpunkte gegen die Helden-Basis",
     copyBuild: "TOP-BUILD KOPIEREN", copied: "BUILD KOPIERT ✓", share: "MATCHUP TEILEN", linkCopied: "LINK KOPIERT ✓", empty: "Keine Items passen zu diesen Filtern. Versuche eine kleinere Stichprobe.",
@@ -79,6 +86,7 @@ const copy = {
     updated: "AKTUALISIERT", assetError: "Heldendaten sind momentan nicht erreichbar.", statsError: "Die Live-Statistiken sind gerade nicht erreichbar. Bitte versuche es erneut.",
     footer: "Community-Projekt · Daten von", disclaimer: "· Nicht mit Valve verbunden.", early: "EARLY", mid: "MID GAME", late: "LATE",
     importerTitle: "Gegnerteam importieren", importerText: "Lade einen Match-Screenshot hoch, auf dem die gegnerischen Heldennamen sichtbar sind. Die Erkennung läuft lokal auf deinem Gerät.",
+    allyImporterText: "Lade einen Scoreboard-Screenshot hoch und wähle die Helden auf deiner Seite. Die Erkennung läuft lokal auf deinem Gerät.",
     dropTitle: "Match-Screenshot hier ablegen", dropText: "oder klicken, um PNG, JPG oder WebP auszuwählen", scanning: "HELDENNAMEN WERDEN GELESEN", detected: "ERKANNTE HELDEN", confidence: "Treffer",
     importHeroes: "AUSGEWÄHLTE HELDEN IMPORTIEREN", scanAgain: "ANDEREN SCREENSHOT WÄHLEN", noHeroes: "Keine Heldennamen erkannt. Versuche einen schärferen Screenshot mit vollständig sichtbarem Scoreboard.", close: "Screenshot-Import schließen", localOnly: "PRIVAT · DAS BILD BLEIBT AUF DEINEM GERÄT",
     moreOptions: "MEHR OPTIONEN", apiFilters: "MATCH-DATEN", queue: "WARTESCHLANGE", both: "Ranked + Unranked", ranked: "Nur Ranked", unranked: "Nur Unranked", dataWindow: "ZEITRAUM", days: "Tage", laneOnly: "NUR GLEICHE LANE",
@@ -107,10 +115,10 @@ function editDistance(a: string, b: string) {
   }
   return row[b.length];
 }
-function detectHeroNames(text: string, heroes: Hero[], ownHeroId: number): Detection[] {
+function detectHeroNames(text: string, heroes: Hero[], excludedHeroIds: number[]): Detection[] {
   const compactText = normalizeText(text);
   const words = text.split(/\s+/).map(normalizeText).filter(Boolean);
-  return heroes.filter((hero) => hero.id !== ownHeroId).map((hero) => {
+  return heroes.filter((hero) => !excludedHeroIds.includes(hero.id)).map((hero) => {
     const target = normalizeText(hero.name);
     if (compactText.includes(target)) return { id: hero.id, confidence: 1 };
     let best = 0;
@@ -136,6 +144,10 @@ export default function Home() {
   const [heroId, setHeroId] = useState(1);
   const [heroPickerOpen, setHeroPickerOpen] = useState(false);
   const [heroSearch, setHeroSearch] = useState("");
+  const [allyPickerOpen, setAllyPickerOpen] = useState(false);
+  const [allySearch, setAllySearch] = useState("");
+  const [allyIds, setAllyIds] = useState<number[]>([]);
+  const [pendingAllyIds, setPendingAllyIds] = useState<number[]>([]);
   const [enemyPickerOpen, setEnemyPickerOpen] = useState(false);
   const [enemySearch, setEnemySearch] = useState("");
   const [pendingEnemyIds, setPendingEnemyIds] = useState<number[]>([]);
@@ -144,12 +156,14 @@ export default function Home() {
   const [gameMinute, setGameMinute] = useState(15);
   const [category, setCategory] = useState<Category>("all");
   const [minSample, setMinSample] = useState(250);
-  const [sortMode, setSortMode] = useState<SortMode>("recommended");
+  const [sortMode, setSortMode] = useState<SortMode>("buytime");
   const [buyTarget, setBuyTarget] = useState<BuyTarget>("carry");
   const [showFullBuild, setShowFullBuild] = useState(false);
   const [queueMode, setQueueMode] = useState<QueueMode>("all");
   const [dataWindow, setDataWindow] = useState(30);
   const [laneOnly, setLaneOnly] = useState(false);
+  const [lane, setLane] = useState<Lane>("all");
+  const [laneOpponentId, setLaneOpponentId] = useState(13);
   const [maxBudget, setMaxBudget] = useState(0);
   const [itemTier, setItemTier] = useState(0);
   const [resultCount, setResultCount] = useState(8);
@@ -163,6 +177,7 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [importerOpen, setImporterOpen] = useState(false);
+  const [importTarget, setImportTarget] = useState<ImportTarget>("enemy");
   const [screenshotUrl, setScreenshotUrl] = useState("");
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrRunning, setOcrRunning] = useState(false);
@@ -188,13 +203,17 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const sharedHero = Number(params.get("hero")), sharedCarry = Number(params.get("carry"));
     const sharedEnemies = (params.get("enemies") ?? "").split(",").map(Number).filter((id) => Number.isFinite(id) && id > 0).slice(0, 6);
+    const sharedAllies = (params.get("allies") ?? "").split(",").map(Number).filter((id) => Number.isFinite(id) && id > 0).slice(0, 5);
     if (sharedHero) setHeroId(sharedHero);
     if (sharedEnemies.length) setEnemyIds(sharedEnemies);
+    if (sharedAllies.length) setAllyIds(sharedAllies);
     if (sharedCarry) setCarryId(sharedCarry);
     const minute = Number(params.get("minute")); if (minute >= 1 && minute <= 40) setGameMinute(minute);
     const queue = params.get("queue"); if (queue === "ranked" || queue === "unranked") setQueueMode(queue);
     const windowDays = Number(params.get("window")); if ([7, 30, 90].includes(windowDays)) setDataWindow(windowDays);
     if (params.get("target") === "team") setBuyTarget("team");
+    const sharedLane = params.get("lane"); if (["blue", "green", "yellow", "purple"].includes(sharedLane ?? "")) { setLane(sharedLane as Lane); setLaneOnly(true); }
+    const sharedLaneOpponent = Number(params.get("laneOpponent")); if (sharedLaneOpponent) setLaneOpponentId(sharedLaneOpponent);
   }, []);
 
   useEffect(() => {
@@ -259,7 +278,7 @@ export default function Home() {
     const [start, end] = phaseRanges[phase];
     const values = (entry: Recommendation) => buyTarget === "team" ? { rate: entry.teamRate, matches: entry.teamMatches, buyTime: entry.teamBuyTime, score: entry.teamScore } : { rate: entry.carryRate, matches: entry.carryMatches, buyTime: entry.carryBuyTime, score: entry.carryScore };
     const filtered = recommendations.filter((entry) => { const value = values(entry); return value.buyTime >= start && value.buyTime <= end && value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
-    return filtered.sort((a, b) => { const av = values(a), bv = values(b); return sortMode === "winrate" ? bv.rate - av.rate : sortMode === "sample" ? bv.matches - av.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : bv.score - av.score; }).slice(0, resultCount);
+    return filtered.sort((a, b) => { const av = values(a), bv = values(b); return sortMode === "buytime" ? av.buyTime - bv.buyTime : sortMode === "winrate" ? bv.rate - av.rate : sortMode === "sample" ? bv.matches - av.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : bv.score - av.score; }).slice(0, resultCount);
   }, [buyTarget, category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
 
   const fullBuildPlan = useMemo(() => {
@@ -305,19 +324,35 @@ export default function Home() {
     return query ? heroes.filter((hero) => hero.name.toLocaleLowerCase(lang).includes(query)) : heroes;
   }, [enemySearch, heroes, lang]);
 
-  function removeEnemy(id: number) { const next = enemyIds.filter((enemyId) => enemyId !== id); setEnemyIds(next); if (carryId === id && next.length) setCarryId(next[0]); }
+  const filteredAllyHeroes = useMemo(() => {
+    const query = allySearch.trim().toLocaleLowerCase(lang);
+    return query ? heroes.filter((hero) => hero.name.toLocaleLowerCase(lang).includes(query)) : heroes;
+  }, [allySearch, heroes, lang]);
+
+  function removeEnemy(id: number) { const next = enemyIds.filter((enemyId) => enemyId !== id); setEnemyIds(next); if (carryId === id && next.length) setCarryId(next[0]); if (laneOpponentId === id && next.length) setLaneOpponentId(next[0]); }
   function openEnemyPicker() { setPendingEnemyIds(enemyIds); setEnemySearch(""); setEnemyPickerOpen(true); }
   function closeEnemyPicker() { setEnemyPickerOpen(false); setEnemySearch(""); setPendingEnemyIds([]); }
   function togglePendingEnemy(id: number) {
-    if (id === heroId) return;
+    if (id === heroId || allyIds.includes(id)) return;
     setPendingEnemyIds((current) => current.includes(id) ? current.filter((enemyId) => enemyId !== id) : current.length < 6 ? [...current, id] : current);
   }
   function applyEnemyTeam() {
     if (!pendingEnemyIds.length) return;
     setEnemyIds(pendingEnemyIds);
     if (!pendingEnemyIds.includes(carryId)) setCarryId(pendingEnemyIds[0]);
+    if (!pendingEnemyIds.includes(laneOpponentId)) setLaneOpponentId(pendingEnemyIds[0]);
     closeEnemyPicker();
   }
+  function openAllyPicker() { setPendingAllyIds(allyIds); setAllySearch(""); setAllyPickerOpen(true); }
+  function closeAllyPicker() { setAllyPickerOpen(false); setAllySearch(""); setPendingAllyIds([]); }
+  function togglePendingAlly(id: number) {
+    if (id === heroId || enemyIds.includes(id)) return;
+    setPendingAllyIds((current) => current.includes(id) ? current.filter((allyId) => allyId !== id) : current.length < 5 ? [...current, id] : current);
+  }
+  function applyAllies() { setAllyIds(pendingAllyIds); closeAllyPicker(); }
+  function removeAlly(id: number) { setAllyIds((current) => current.filter((allyId) => allyId !== id)); }
+  function openImporter(target: ImportTarget) { setImportTarget(target); setImporterOpen(true); }
+  function selectLane(value: Lane) { setLane(value); setLaneOnly(value !== "all"); }
   async function readScreenshot(file: File) {
     if (!file.type.startsWith("image/")) return;
     if (screenshotUrl) URL.revokeObjectURL(screenshotUrl);
@@ -327,30 +362,36 @@ export default function Home() {
       const { createWorker } = await import("tesseract.js");
       worker = await createWorker("eng", 1, { logger: (message) => { if (message.status === "recognizing text") setOcrProgress(Math.round(message.progress * 100)); } });
       const result = await worker.recognize(file);
-      const found = detectHeroNames(result.data.text, heroes, heroId);
-      setDetections(found); setSelectedDetections(found.slice(0, 6).map((entry) => entry.id)); setOcrComplete(true);
+      const excluded = importTarget === "ally" ? [heroId, ...enemyIds] : [heroId, ...allyIds];
+      const limit = importTarget === "ally" ? 5 : 6;
+      const found = detectHeroNames(result.data.text, heroes, excluded);
+      setDetections(found); setSelectedDetections(found.slice(0, limit).map((entry) => entry.id)); setOcrComplete(true);
     } catch { setDetections([]); setOcrComplete(true); }
     finally { if (worker) await worker.terminate(); setOcrRunning(false); }
   }
   function closeImporter() { if (screenshotUrl) URL.revokeObjectURL(screenshotUrl); setScreenshotUrl(""); setImporterOpen(false); setDetections([]); setSelectedDetections([]); setOcrComplete(false); }
   function importDetectedHeroes() {
-    const ids = selectedDetections.filter((id) => id !== heroId).slice(0, 6);
+    const ids = selectedDetections.filter((id) => id !== heroId).slice(0, importTarget === "ally" ? 5 : 6);
     if (!ids.length) return;
-    setEnemyIds(ids); if (!ids.includes(carryId)) setCarryId(ids[0]); closeImporter();
+    if (importTarget === "ally") setAllyIds(ids);
+    else { setEnemyIds(ids); if (!ids.includes(carryId)) setCarryId(ids[0]); if (!ids.includes(laneOpponentId)) setLaneOpponentId(ids[0]); }
+    closeImporter();
   }
   async function copyTopBuild() {
     const text = `${ownHero?.name ?? "Hero"} vs ${carryHero?.name ?? "Carry"}: ${visibleRecommendations.slice(0, 5).map((entry, index) => `${index + 1}. ${entry.item.name}`).join(" · ")}`;
     try { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 2200); } catch { setCopied(false); }
   }
   async function shareMatchup() {
-    const params = new URLSearchParams({ hero: String(heroId), enemies: enemyIds.join(","), carry: String(carryId), minute: String(gameMinute), queue: queueMode, window: String(dataWindow), target: buyTarget });
+    const params = new URLSearchParams({ hero: String(heroId), allies: allyIds.join(","), enemies: enemyIds.join(","), carry: String(carryId), minute: String(gameMinute), queue: queueMode, window: String(dataWindow), target: buyTarget, lane, laneOpponent: String(laneOpponentId) });
     const url = `${window.location.origin}${window.location.pathname}?${params}`;
     try { await navigator.clipboard.writeText(url); window.history.replaceState(null, "", url); setLinkCopied(true); window.setTimeout(() => setLinkCopied(false), 2200); } catch { setLinkCopied(false); }
   }
   function chooseOwnHero(id: number) {
     const nextEnemies = enemyIds.filter((enemyId) => enemyId !== id);
+    const nextAllies = allyIds.filter((allyId) => allyId !== id);
     setHeroId(id);
     if (nextEnemies.length !== enemyIds.length) setEnemyIds(nextEnemies);
+    if (nextAllies.length !== allyIds.length) setAllyIds(nextAllies);
     if (carryId === id && nextEnemies.length) setCarryId(nextEnemies[0]);
     setHeroPickerOpen(false); setHeroSearch("");
   }
@@ -384,18 +425,24 @@ export default function Home() {
           <div className="step-label"><span>01</span> {t.yourHero}</div>
           <button className="selected-hero-button" type="button" onClick={() => setHeroPickerOpen(true)} aria-haspopup="dialog"><HeroPortrait hero={ownHero} /><span><small>{t.youPlay}</small><strong>{ownHero?.name ?? "—"}</strong><i>{t.changeHero}</i></span><b>⌄</b></button>
         </div>
+        <div className="step-block ally-block">
+          <div className="step-label"><span>02</span> {t.yourTeam} <b>{allyIds.length + 1}/6</b></div>
+          <div className="ally-squad"><div className="ally-chip own"><HeroPortrait hero={ownHero} size="small" /><span><small>{t.ownPick}</small><strong>{ownHero?.name}</strong></span></div>{allyIds.map((id) => { const hero = heroMap.get(id); return <div className="ally-chip" key={id}><HeroPortrait hero={hero} size="small" /><span><small>{t.allyPick}</small><strong>{hero?.name}</strong></span><button type="button" onClick={() => removeAlly(id)} aria-label={`${t.remove} ${hero?.name}`}>×</button></div>; })}{allyIds.length < 5 && <button className="ally-empty" type="button" onClick={openAllyPicker}>＋</button>}</div>
+          <div className="ally-tools"><button type="button" onClick={openAllyPicker}><span>▦</span>{t.buildOwnTeam}</button><button type="button" onClick={() => openImporter("ally")}><span>▣</span>{t.importAllies}</button></div>
+        </div>
         <div className="step-block enemy-block">
-          <div className="step-label"><span>02</span> {t.enemyTeam} <b>{enemyIds.length}/6</b></div>
+          <div className="step-label"><span>03</span> {t.enemyTeam} <b>{enemyIds.length}/6</b></div>
           <div className="enemy-squad">{enemyIds.map((id, index) => { const hero = heroMap.get(id); const isCarry = id === carryId; return <article className={`enemy-squad-card ${isCarry ? "is-carry" : ""}`} key={id}>
             <button className="enemy-focus-button" type="button" onClick={() => setCarryId(id)}><HeroPortrait hero={hero} size="small" /><span><small>{isCarry ? t.enemyCarry : `ENEMY 0${index + 1}`}</small><strong>{hero?.name}</strong></span><i>{isCarry ? "★" : "○"}</i></button>
             <button className="enemy-remove-card" type="button" onClick={() => removeEnemy(id)} aria-label={`${t.remove} ${hero?.name}`}>×</button>
           </article>; })}{enemyIds.length < 6 && <button className="empty-enemy-slot" type="button" onClick={openEnemyPicker}><span>＋</span><b>{t.addEnemy}</b></button>}</div>
           <p className="carry-hint"><span>★</span> {t.carryHint}</p>
-          <div className="enemy-tools"><button className="manage-enemy-button" type="button" onClick={openEnemyPicker} aria-label={t.openEnemyPicker}><span>▦</span> {t.buildEnemyTeam}</button><button className="import-trigger" type="button" onClick={() => setImporterOpen(true)}><span>▣</span> {t.importScreen}</button></div>
+          <div className="enemy-tools"><button className="manage-enemy-button" type="button" onClick={openEnemyPicker} aria-label={t.openEnemyPicker}><span>▦</span> {t.buildEnemyTeam}</button><button className="import-trigger" type="button" onClick={() => openImporter("enemy")}><span>▣</span> {t.importScreen}</button></div>
         </div>
         <div className="step-block carry-block">
-          <div className="step-label"><span>03</span> {t.focusTarget}</div>
+          <div className="step-label"><span>04</span> {t.focusTarget}</div>
           <div className="carry-card"><HeroPortrait hero={carryHero} /><div><small>{t.enemyCarry}</small><strong>{carryHero?.name ?? "–"}</strong></div>{matchupWinRate !== null && <div className="threat"><small>{t.matchupWr}</small><strong>{pct(matchupWinRate)}</strong></div>}</div>
+          <div className="lane-setup"><small>{t.laneSetup}</small><div className="lane-buttons">{(["all", "blue", "green", "yellow", "purple"] as Lane[]).map((value) => <button className={`${lane === value ? "active" : ""} lane-${value}`} type="button" key={value} onClick={() => selectLane(value)}>{value === "all" ? "×" : ""}<span>{t[value === "all" ? "anyLane" : value]}</span></button>)}</div><label><span>{t.laneOpponent}</span><select value={laneOpponentId} onChange={(event) => setLaneOpponentId(Number(event.target.value))}>{enemyIds.map((id) => <option key={id} value={id}>{heroMap.get(id)?.name}</option>)}</select></label></div>
           <div className={`auto-update-status ${loading ? "updating" : ""}`}><span /><div><strong>{loading ? t.autoUpdating : t.autoLive}</strong><small>{t.autoHint}</small></div></div>
         </div>
       </div>
@@ -418,7 +465,7 @@ export default function Home() {
           <div className="quick-stats"><div><small>{t.matchup}</small><strong>{matchupWinRate === null ? "—" : pct(matchupWinRate)}</strong></div><div><small>{t.games}</small><strong>{formatMatches(matchup?.matches_played ?? 0, lang)}</strong></div><div><small>{t.focus}</small><strong>{carryHero?.name ?? "—"}</strong></div><div><small>{t.items}</small><strong>{visibleRecommendations.length}</strong></div></div>
         </div>
 
-        <div className="filter-bar"><div className="filter-title">{t.filters}</div><label><small>{t.category}</small><select value={category} onChange={(event) => setCategory(event.target.value as Category)}><option value="all">{t.all}</option><option value="weapon">{t.weapon}</option><option value="vitality">{t.vitality}</option><option value="spirit">{t.spirit}</option></select></label><label><small>{t.minSample}</small><select value={minSample} onChange={(event) => setMinSample(Number(event.target.value))}><option value="80">80+</option><option value="250">250+</option><option value="1000">1K+</option><option value="5000">5K+</option></select></label><label><small>{t.sort}</small><select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}><option value="recommended">{t.recommended}</option><option value="winrate">{t.winrate}</option><option value="sample">{t.sample}</option><option value="cost">{t.cost}</option></select></label></div>
+        <div className="filter-bar"><div className="filter-title">{t.filters}</div><label><small>{t.category}</small><select value={category} onChange={(event) => setCategory(event.target.value as Category)}><option value="all">{t.all}</option><option value="weapon">{t.weapon}</option><option value="vitality">{t.vitality}</option><option value="spirit">{t.spirit}</option></select></label><label><small>{t.minSample}</small><select value={minSample} onChange={(event) => setMinSample(Number(event.target.value))}><option value="80">80+</option><option value="250">250+</option><option value="1000">1K+</option><option value="5000">5K+</option></select></label><label><small>{t.sort}</small><select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}><option value="buytime">{t.buytimeSort}</option><option value="recommended">{t.recommended}</option><option value="winrate">{t.winrate}</option><option value="sample">{t.sample}</option><option value="cost">{t.cost}</option></select></label></div>
 
         <details className="advanced-options">
           <summary><span>＋</span> {t.moreOptions}</summary>
@@ -442,20 +489,31 @@ export default function Home() {
         {error && <div className="error-card">{error}</div>}
         {!error && loading && <div className="loading-grid">{[1,2,3,4].map((n) => <div key={n} />)}</div>}
         {!error && !loading && !visibleRecommendations.length && <div className="empty-card">{t.empty}</div>}
-        {!error && !loading && Boolean(visibleRecommendations.length) && <div className="item-grid">{visibleRecommendations.map((entry, index) => { const rate = buyTarget === "team" ? entry.teamRate : entry.carryRate; const matches = buyTarget === "team" ? entry.teamMatches : entry.carryMatches; const buyTime = buyTarget === "team" ? entry.teamBuyTime : entry.carryBuyTime; const lift = (rate - entry.baselineRate) * 100; return <article className={`item-card slot-${entry.item.item_slot_type}`} key={entry.item.id}><div className="rank">#{String(index + 1).padStart(2, "0")}</div><div className="item-icon">{entry.item.shop_image_webp ? <img src={entry.item.shop_image_webp} alt="" /> : <span>◆</span>}</div><div className="item-main"><div className="item-meta"><span>{entry.item.item_slot_type && t[entry.item.item_slot_type]}</span><span>{buyTarget === "team" ? t.vsTeamMode : t.vsCarryMode}</span><span>T{entry.item.item_tier}</span></div><h3>{entry.item.name}</h3><div className="item-reason">{lift >= 0 ? "+" : ""}{lift.toFixed(1)} {buyTarget === "team" ? t.vsTeam : t.vsCarry}</div>{buyTarget === "team" && Boolean(entry.enemyRates.length) && <div className="team-item-targets"><small>{t.bestAgainst}</small><div>{entry.enemyRates.slice(0, 2).map((target) => <span key={target.heroId} title={`${heroMap.get(target.heroId)?.name} · ${pct(target.rate)}`}><HeroPortrait hero={heroMap.get(target.heroId)} size="small" /><b>{target.lift >= 0 ? "+" : ""}{(target.lift * 100).toFixed(1)}</b></span>)}</div></div>}</div><div className="item-stat"><small>{t.winrateLabel}</small><strong>{pct(rate)}</strong></div><div className="item-stat"><small>{t.sample}</small><strong>{formatMatches(matches, lang)}</strong></div><div className="item-stat"><small>{t.buyTime}</small><strong>{formatTime(buyTime, lang)}</strong></div><div className="cost">◈ {entry.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</div></article>; })}</div>}
+        {!error && !loading && Boolean(visibleRecommendations.length) && <div className="item-grid">{visibleRecommendations.map((entry, index) => { const rate = buyTarget === "team" ? entry.teamRate : entry.carryRate; const matches = buyTarget === "team" ? entry.teamMatches : entry.carryMatches; const buyTime = buyTarget === "team" ? entry.teamBuyTime : entry.carryBuyTime; const lift = (rate - entry.baselineRate) * 100; return <article className={`item-card slot-${entry.item.item_slot_type}`} key={entry.item.id}><div className="rank">#{String(index + 1).padStart(2, "0")}</div><div className="item-icon">{entry.item.shop_image_webp ? <img src={entry.item.shop_image_webp} alt="" /> : <span>◆</span>}</div><div className="item-main"><div className="item-meta"><span>{entry.item.item_slot_type && t[entry.item.item_slot_type]}</span><span>{buyTarget === "team" ? t.vsTeamMode : t.vsCarryMode}</span><span>T{entry.item.item_tier}</span></div><h3>{entry.item.name}</h3><div className="item-reason">{lift >= 0 ? "+" : ""}{lift.toFixed(1)} {buyTarget === "team" ? t.vsTeam : t.vsCarry}</div>{buyTarget === "team" && Boolean(entry.enemyRates.length) && <div className="team-item-targets"><small>{t.bestAgainst}</small><div>{entry.enemyRates.slice(0, 2).map((target) => { const targetHero = heroMap.get(target.heroId); return <span key={target.heroId} title={`${targetHero?.name} · ${pct(target.rate)}`}><HeroPortrait hero={targetHero} size="small" /><em>{targetHero?.name}</em><b>{target.lift >= 0 ? "+" : ""}{(target.lift * 100).toFixed(1)}</b></span>; })}</div></div>}</div><div className="item-stat"><small>{t.winrateLabel}</small><strong>{pct(rate)}</strong></div><div className="item-stat"><small>{t.sample}</small><strong>{formatMatches(matches, lang)}</strong></div><div className="item-stat"><small>{t.buyTime}</small><strong>{formatTime(buyTime, lang)}</strong></div><div className="cost">◈ {entry.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</div></article>; })}</div>}
 
         <div className="method-note"><span>i</span><p><strong>{t.methodTitle}</strong> {t.method}</p>{updatedAt && <time>{t.updated} {updatedAt.toLocaleTimeString(lang === "de" ? "de-DE" : "en-US", { hour: "2-digit", minute: "2-digit" })}</time>}</div>
       </section>
 
       <footer><div className="brand"><span className="brand-mark">CB</span><span><strong>COUNTER</strong>BUILD</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a> {t.disclaimer}</p></footer>
 
+      {allyPickerOpen && <div className="import-overlay hero-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="ally-picker-title">
+        <div className="import-modal hero-picker-modal ally-picker-modal">
+          <button className="modal-close" type="button" onClick={closeAllyPicker} aria-label={t.closeAllyPicker}>×</button>
+          <div className="hero-picker-head ally-picker-head"><div><div className="eyebrow">{t.allyRoster} · {heroes.length}</div><h2 id="ally-picker-title">{t.buildOwnTeam}</h2><p>{pendingAllyIds.length}/5 {t.alliesSelected}</p></div><label className="hero-search"><span>⌕</span><input autoFocus value={allySearch} onChange={(event) => setAllySearch(event.target.value)} placeholder={t.allySearch} /></label></div>
+          <div className="hero-roster-grid ally-roster-grid">{filteredAllyHeroes.map((hero) => { const selected = pendingAllyIds.includes(hero.id); const unavailable = hero.id === heroId || enemyIds.includes(hero.id); const selectionIndex = pendingAllyIds.indexOf(hero.id); return <button className={`${selected ? "ally-selected" : ""} ${unavailable ? "enemy" : ""}`} type="button" key={hero.id} onClick={() => togglePendingAlly(hero.id)} disabled={unavailable} aria-pressed={selected}>
+            <span className="hero-card-art">{hero.images?.icon_hero_card_webp ? <img src={hero.images.icon_hero_card_webp} alt="" /> : <HeroPortrait hero={hero} />}</span><span className="hero-card-name"><strong>{hero.name}</strong><small>{selected ? `${t.teamSlots} · 0${selectionIndex + 1}` : hero.id === heroId ? t.ownPick : enemyIds.includes(hero.id) ? t.enemyPick : `#${String(hero.id).padStart(2, "0")}`}</small></span>{selected && <i>{selectionIndex + 1}</i>}
+          </button>; })}</div>
+          <div className="enemy-picker-actions ally-picker-actions"><button type="button" onClick={closeAllyPicker}>{t.cancel}</button><div><span>{pendingAllyIds.length}</span><small>/ 5 {t.alliesSelected}</small></div><button type="button" onClick={applyAllies}>{t.applyAllies} →</button></div>
+        </div>
+      </div>}
+
       {enemyPickerOpen && <div className="import-overlay hero-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="enemy-picker-title">
         <div className="import-modal hero-picker-modal enemy-picker-modal">
           <button className="modal-close" type="button" onClick={closeEnemyPicker} aria-label={t.closeEnemyPicker}>×</button>
           <div className="hero-picker-head enemy-picker-head"><div><div className="eyebrow">{t.enemyRoster} · {heroes.length}</div><h2 id="enemy-picker-title">{t.buildEnemyTeam}</h2><p>{pendingEnemyIds.length}/6 {t.teamSelected}</p></div><label className="hero-search"><span>⌕</span><input autoFocus value={enemySearch} onChange={(event) => setEnemySearch(event.target.value)} placeholder={t.enemySearch} /></label></div>
-          <div className="hero-roster-grid enemy-roster-grid" ref={enemyRosterRef}>{filteredEnemyHeroes.map((hero) => { const selected = pendingEnemyIds.includes(hero.id); const ownPick = hero.id === heroId; const selectionIndex = pendingEnemyIds.indexOf(hero.id); return <button className={`${selected ? "team-selected" : ""} ${ownPick ? "enemy" : ""}`} type="button" key={hero.id} onClick={() => togglePendingEnemy(hero.id)} disabled={ownPick} aria-pressed={selected}>
+          <div className="hero-roster-grid enemy-roster-grid" ref={enemyRosterRef}>{filteredEnemyHeroes.map((hero) => { const selected = pendingEnemyIds.includes(hero.id); const unavailable = hero.id === heroId || allyIds.includes(hero.id); const selectionIndex = pendingEnemyIds.indexOf(hero.id); return <button className={`${selected ? "team-selected" : ""} ${unavailable ? "enemy" : ""}`} type="button" key={hero.id} onClick={() => togglePendingEnemy(hero.id)} disabled={unavailable} aria-pressed={selected}>
             <span className="hero-card-art">{hero.images?.icon_hero_card_webp ? <img src={hero.images.icon_hero_card_webp} alt="" /> : <HeroPortrait hero={hero} />}</span>
-            <span className="hero-card-name"><strong>{hero.name}</strong><small>{selected ? `${t.teamSlots} · 0${selectionIndex + 1}` : ownPick ? t.ownPick : `#${String(hero.id).padStart(2, "0")}`}</small></span>
+            <span className="hero-card-name"><strong>{hero.name}</strong><small>{selected ? `${t.teamSlots} · 0${selectionIndex + 1}` : hero.id === heroId ? t.ownPick : allyIds.includes(hero.id) ? t.allyPick : `#${String(hero.id).padStart(2, "0")}`}</small></span>
             {selected && <i>{selectionIndex + 1}</i>}
           </button>; })}</div>
           <div className="enemy-picker-actions"><button type="button" onClick={closeEnemyPicker}>{t.cancel}</button><div><span>{pendingEnemyIds.length}</span><small>/ 6 {t.teamSelected}</small></div><button type="button" onClick={applyEnemyTeam} disabled={!pendingEnemyIds.length}>{t.applyTeam} →</button></div>
@@ -478,8 +536,8 @@ export default function Home() {
         <div className="import-modal">
           <button className="modal-close" type="button" onClick={closeImporter} aria-label={t.close}>×</button>
           <div className="eyebrow">AUTO TEAM IMPORT · OCR</div>
-          <h2 id="import-title">{t.importerTitle}</h2>
-          <p className="import-intro">{t.importerText}</p>
+          <h2 id="import-title">{importTarget === "ally" ? t.importAllies : t.importerTitle}</h2>
+          <p className="import-intro">{importTarget === "ally" ? t.allyImporterText : t.importerText}</p>
           <div className="privacy-note">● {t.localOnly}</div>
 
           {!screenshotUrl && <label className="drop-zone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void readScreenshot(file); }}>
@@ -491,11 +549,11 @@ export default function Home() {
             <div className="screenshot-preview"><img src={screenshotUrl} alt="Match screenshot preview" />{ocrRunning && <div className="scan-line" />}</div>
             <div className="scan-results">
               {ocrRunning && <div className="ocr-progress"><div><span style={{ width: `${ocrProgress}%` }} /></div><strong>{t.scanning} · {ocrProgress}%</strong></div>}
-              {ocrComplete && <><div className="detected-title"><span>{t.detected}</span><b>{detections.length}</b></div>{detections.length ? <div className="detected-list">{detections.map((entry) => { const hero = heroMap.get(entry.id); const selected = selectedDetections.includes(entry.id); return <label className={selected ? "selected" : ""} key={entry.id}><input type="checkbox" checked={selected} onChange={() => setSelectedDetections((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : current.length < 6 ? [...current, entry.id] : current)} /><HeroPortrait hero={hero} size="small" /><span><strong>{hero?.name}</strong><small>{Math.round(entry.confidence * 100)}% {t.confidence}</small></span><i>{selected ? "✓" : "+"}</i></label>; })}</div> : <div className="ocr-empty">{t.noHeroes}</div>}</>}
+              {ocrComplete && <><div className="detected-title"><span>{t.detected}</span><b>{detections.length}</b></div>{detections.length ? <div className="detected-list">{detections.map((entry) => { const hero = heroMap.get(entry.id); const selected = selectedDetections.includes(entry.id); const importLimit = importTarget === "ally" ? 5 : 6; return <label className={selected ? "selected" : ""} key={entry.id}><input type="checkbox" checked={selected} onChange={() => setSelectedDetections((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : current.length < importLimit ? [...current, entry.id] : current)} /><HeroPortrait hero={hero} size="small" /><span><strong>{hero?.name}</strong><small>{Math.round(entry.confidence * 100)}% {t.confidence}</small></span><i>{selected ? "✓" : "+"}</i></label>; })}</div> : <div className="ocr-empty">{t.noHeroes}</div>}</>}
             </div>
           </div>}
 
-          {screenshotUrl && <div className="import-actions"><label className="rescan-button"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readScreenshot(file); }} />{t.scanAgain}</label><button type="button" onClick={importDetectedHeroes} disabled={!selectedDetections.length || ocrRunning}>{t.importHeroes} ({selectedDetections.length}/6) →</button></div>}
+          {screenshotUrl && <div className="import-actions"><label className="rescan-button"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readScreenshot(file); }} />{t.scanAgain}</label><button type="button" onClick={importDetectedHeroes} disabled={!selectedDetections.length || ocrRunning}>{importTarget === "ally" ? t.applyAllies : t.importHeroes} ({selectedDetections.length}/{importTarget === "ally" ? 5 : 6}) →</button></div>}
         </div>
       </div>}
     </main>
