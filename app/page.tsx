@@ -22,6 +22,7 @@ type Item = {
 type ItemStat = { item_id: number; wins: number; losses: number; matches: number; players: number; avg_buy_time_s: number };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type Recommendation = { item: Item; score: number; winRate: number; baselineRate: number; carryRate: number; matches: number; buyTime: number };
+type Detection = { id: number; confidence: number };
 
 const copy = {
   en: {
@@ -29,7 +30,7 @@ const copy = {
     heroTitleA: "Build for the fight", heroTitleB: "happening right now.",
     heroText: "Choose your hero, mark the enemy carry, and get item recommendations ranked with real matchup data.",
     yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero",
-    enemyTeam: "ENEMY TEAM", chooseEnemy: "Choose an enemy", addEnemy: "+ Add enemy", remove: "Remove",
+    enemyTeam: "ENEMY TEAM", chooseEnemy: "Choose an enemy", addEnemy: "+ Add enemy", remove: "Remove", importScreen: "IMPORT SCREENSHOT",
     focusTarget: "FOCUS TARGET", enemyCarry: "ENEMY CARRY", matchupWr: "YOUR MATCHUP WR",
     analyze: "ANALYZE MATCHUP →", analyzing: "ANALYZING …",
     liveRec: "LIVE RECOMMENDATION", bestBuys: "Your best buys", against: "against",
@@ -42,13 +43,16 @@ const copy = {
     methodTitle: "How ranking works:", method: "Carry matchup, the full enemy team, your hero baseline and sample confidence are weighted together. Correlation is not a guarantee—adapt to the actual game state.",
     updated: "UPDATED", assetError: "Hero data is temporarily unavailable.", statsError: "Live statistics are temporarily unavailable. Please try again.",
     footer: "Community project · Data by", disclaimer: "· Not affiliated with Valve.", early: "EARLY", mid: "MID GAME", late: "LATE",
+    importerTitle: "Import enemy team", importerText: "Upload a match screenshot where the enemy hero names are visible. Recognition runs locally on your device.",
+    dropTitle: "Drop match screenshot here", dropText: "or click to choose a PNG, JPG, or WebP", scanning: "READING HERO NAMES", detected: "DETECTED HEROES", confidence: "match",
+    importHeroes: "IMPORT SELECTED HEROES", scanAgain: "CHOOSE ANOTHER SCREENSHOT", noHeroes: "No hero names were detected. Try a sharper screenshot with the scoreboard fully visible.", close: "Close screenshot importer", localOnly: "PRIVATE · IMAGE NEVER LEAVES YOUR DEVICE",
   },
   de: {
     home: "Counterbuild Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE",
     heroTitleA: "Baue für den Kampf,", heroTitleB: "der gerade passiert.",
     heroText: "Wähle deinen Helden, markiere den gegnerischen Carry und erhalte Item-Empfehlungen aus echten Matchup-Daten.",
     yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Deinen Helden auswählen",
-    enemyTeam: "GEGNERISCHES TEAM", chooseEnemy: "Gegner auswählen", addEnemy: "+ Gegner", remove: "Entfernen",
+    enemyTeam: "GEGNERISCHES TEAM", chooseEnemy: "Gegner auswählen", addEnemy: "+ Gegner", remove: "Entfernen", importScreen: "SCREENSHOT IMPORTIEREN",
     focusTarget: "FOKUS-ZIEL", enemyCarry: "GEGNERISCHER CARRY", matchupWr: "DEINE MATCHUP-WR",
     analyze: "MATCHUP ANALYSIEREN →", analyzing: "ANALYSE LÄUFT …",
     liveRec: "LIVE-EMPFEHLUNG", bestBuys: "Deine besten Käufe", against: "gegen",
@@ -61,6 +65,9 @@ const copy = {
     methodTitle: "So wird gerankt:", method: "Carry-Matchup, gesamtes Gegnerteam, Basis-Winrate deines Helden und Stichprobenqualität werden gewichtet. Korrelation ist keine Garantie—passe den Kauf an den Spielstand an.",
     updated: "AKTUALISIERT", assetError: "Heldendaten sind momentan nicht erreichbar.", statsError: "Die Live-Statistiken sind gerade nicht erreichbar. Bitte versuche es erneut.",
     footer: "Community-Projekt · Daten von", disclaimer: "· Nicht mit Valve verbunden.", early: "EARLY", mid: "MID GAME", late: "LATE",
+    importerTitle: "Gegnerteam importieren", importerText: "Lade einen Match-Screenshot hoch, auf dem die gegnerischen Heldennamen sichtbar sind. Die Erkennung läuft lokal auf deinem Gerät.",
+    dropTitle: "Match-Screenshot hier ablegen", dropText: "oder klicken, um PNG, JPG oder WebP auszuwählen", scanning: "HELDENNAMEN WERDEN GELESEN", detected: "ERKANNTE HELDEN", confidence: "Treffer",
+    importHeroes: "AUSGEWÄHLTE HELDEN IMPORTIEREN", scanAgain: "ANDEREN SCREENSHOT WÄHLEN", noHeroes: "Keine Heldennamen erkannt. Versuche einen schärferen Screenshot mit vollständig sichtbarem Scoreboard.", close: "Screenshot-Import schließen", localOnly: "PRIVAT · DAS BILD BLEIBT AUF DEINEM GERÄT",
   },
 } as const;
 
@@ -70,6 +77,37 @@ function adjustedRate(stat?: ItemStat) { return stat ? (stat.wins + 60) / (stat.
 function pct(value: number) { return `${(value * 100).toFixed(1)}%`; }
 function formatMatches(value: number, lang: Lang) { return new Intl.NumberFormat(lang === "de" ? "de-DE" : "en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value); }
 function formatTime(seconds: number, lang: Lang) { return `~${Math.max(0, Math.round(seconds / 60))} ${lang === "de" ? "Min." : "min"}`; }
+
+function normalizeText(value: string) { return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, ""); }
+function editDistance(a: string, b: string) {
+  const row = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    let previous = row[0]; row[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const current = row[j];
+      row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (a[i - 1] === b[j - 1] ? 0 : 1));
+      previous = current;
+    }
+  }
+  return row[b.length];
+}
+function detectHeroNames(text: string, heroes: Hero[], ownHeroId: number): Detection[] {
+  const compactText = normalizeText(text);
+  const words = text.split(/\s+/).map(normalizeText).filter(Boolean);
+  return heroes.filter((hero) => hero.id !== ownHeroId).map((hero) => {
+    const target = normalizeText(hero.name);
+    if (compactText.includes(target)) return { id: hero.id, confidence: 1 };
+    let best = 0;
+    for (let size = 1; size <= 3; size += 1) {
+      for (let index = 0; index <= words.length - size; index += 1) {
+        const candidate = words.slice(index, index + size).join("");
+        const similarity = 1 - editDistance(target, candidate) / Math.max(target.length, candidate.length, 1);
+        if (similarity > best) best = similarity;
+      }
+    }
+    return { id: hero.id, confidence: best };
+  }).filter((entry) => entry.confidence >= (normalizeText(heroes.find((hero) => hero.id === entry.id)?.name ?? "").length <= 4 ? .78 : .66)).sort((a, b) => b.confidence - a.confidence).slice(0, 8);
+}
 
 function HeroPortrait({ hero, size = "normal" }: { hero?: Hero; size?: "small" | "normal" }) {
   return <span className={`portrait portrait-${size}`}>{hero?.images?.icon_image_small_webp ? <img src={hero.images.icon_image_small_webp} alt="" /> : hero?.name.slice(0, 1) ?? "?"}</span>;
@@ -93,6 +131,13 @@ export default function Home() {
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [copied, setCopied] = useState(false);
+  const [importerOpen, setImporterOpen] = useState(false);
+  const [screenshotUrl, setScreenshotUrl] = useState("");
+  const [ocrProgress, setOcrProgress] = useState(0);
+  const [ocrRunning, setOcrRunning] = useState(false);
+  const [ocrComplete, setOcrComplete] = useState(false);
+  const [detections, setDetections] = useState<Detection[]>([]);
+  const [selectedDetections, setSelectedDetections] = useState<number[]>([]);
   const t = copy[lang];
   const phase: Phase = gameMinute < 11 ? "early" : gameMinute < 21 ? "mid" : "late";
 
@@ -160,6 +205,26 @@ export default function Home() {
   function addEnemy() { if (enemyToAdd !== heroId && !enemyIds.includes(enemyToAdd) && enemyIds.length < 6) setEnemyIds((current) => [...current, enemyToAdd]); }
   function removeEnemy(id: number) { const next = enemyIds.filter((enemyId) => enemyId !== id); setEnemyIds(next); if (carryId === id && next.length) setCarryId(next[0]); }
   function submit(event: FormEvent) { event.preventDefault(); void analyze(); }
+  async function readScreenshot(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    if (screenshotUrl) URL.revokeObjectURL(screenshotUrl);
+    setScreenshotUrl(URL.createObjectURL(file)); setOcrRunning(true); setOcrComplete(false); setOcrProgress(0); setDetections([]); setSelectedDetections([]);
+    let worker: Awaited<ReturnType<typeof import("tesseract.js")["createWorker"]>> | null = null;
+    try {
+      const { createWorker } = await import("tesseract.js");
+      worker = await createWorker("eng", 1, { logger: (message) => { if (message.status === "recognizing text") setOcrProgress(Math.round(message.progress * 100)); } });
+      const result = await worker.recognize(file);
+      const found = detectHeroNames(result.data.text, heroes, heroId);
+      setDetections(found); setSelectedDetections(found.slice(0, 6).map((entry) => entry.id)); setOcrComplete(true);
+    } catch { setDetections([]); setOcrComplete(true); }
+    finally { if (worker) await worker.terminate(); setOcrRunning(false); }
+  }
+  function closeImporter() { if (screenshotUrl) URL.revokeObjectURL(screenshotUrl); setScreenshotUrl(""); setImporterOpen(false); setDetections([]); setSelectedDetections([]); setOcrComplete(false); }
+  function importDetectedHeroes() {
+    const ids = selectedDetections.filter((id) => id !== heroId).slice(0, 6);
+    if (!ids.length) return;
+    setEnemyIds(ids); if (!ids.includes(carryId)) setCarryId(ids[0]); closeImporter();
+  }
   async function copyTopBuild() {
     const text = `${ownHero?.name ?? "Hero"} vs ${carryHero?.name ?? "Carry"}: ${visibleRecommendations.slice(0, 5).map((entry, index) => `${index + 1}. ${entry.item.name}`).join(" · ")}`;
     try { await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 2200); } catch { setCopied(false); }
@@ -196,6 +261,7 @@ export default function Home() {
           <div className="step-label"><span>02</span> {t.enemyTeam} <b>{enemyIds.length}/6</b></div>
           <div className="enemy-list">{enemyIds.map((id) => { const hero = heroMap.get(id); return <div className={`enemy-chip ${id === carryId ? "is-carry" : ""}`} key={id}><button type="button" onClick={() => setCarryId(id)}><HeroPortrait hero={hero} size="small" /><span>{hero?.name}</span>{id === carryId && <b>CARRY</b>}</button><button className="remove-enemy" type="button" onClick={() => removeEnemy(id)} aria-label={`${t.remove} ${hero?.name}`}>×</button></div>; })}</div>
           <div className="add-enemy"><select value={enemyToAdd} onChange={(event) => setEnemyToAdd(Number(event.target.value))} aria-label={t.chooseEnemy}>{availableEnemies.map((hero) => <option key={hero.id} value={hero.id}>{hero.name}</option>)}</select><button type="button" onClick={addEnemy} disabled={enemyIds.length >= 6}>{t.addEnemy}</button></div>
+          <button className="import-trigger" type="button" onClick={() => setImporterOpen(true)}><span>▣</span> {t.importScreen}</button>
         </div>
         <div className="step-block carry-block">
           <div className="step-label"><span>03</span> {t.focusTarget}</div>
@@ -223,6 +289,31 @@ export default function Home() {
       </section>
 
       <footer><div className="brand"><span className="brand-mark">CB</span><span><strong>COUNTER</strong>BUILD</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a> {t.disclaimer}</p></footer>
+
+      {importerOpen && <div className="import-overlay" role="dialog" aria-modal="true" aria-labelledby="import-title">
+        <div className="import-modal">
+          <button className="modal-close" type="button" onClick={closeImporter} aria-label={t.close}>×</button>
+          <div className="eyebrow">AUTO TEAM IMPORT · OCR</div>
+          <h2 id="import-title">{t.importerTitle}</h2>
+          <p className="import-intro">{t.importerText}</p>
+          <div className="privacy-note">● {t.localOnly}</div>
+
+          {!screenshotUrl && <label className="drop-zone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const file = event.dataTransfer.files[0]; if (file) void readScreenshot(file); }}>
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readScreenshot(file); }} />
+            <span className="upload-glyph">▣</span><strong>{t.dropTitle}</strong><small>{t.dropText}</small>
+          </label>}
+
+          {screenshotUrl && <div className="scan-layout">
+            <div className="screenshot-preview"><img src={screenshotUrl} alt="Match screenshot preview" />{ocrRunning && <div className="scan-line" />}</div>
+            <div className="scan-results">
+              {ocrRunning && <div className="ocr-progress"><div><span style={{ width: `${ocrProgress}%` }} /></div><strong>{t.scanning} · {ocrProgress}%</strong></div>}
+              {ocrComplete && <><div className="detected-title"><span>{t.detected}</span><b>{detections.length}</b></div>{detections.length ? <div className="detected-list">{detections.map((entry) => { const hero = heroMap.get(entry.id); const selected = selectedDetections.includes(entry.id); return <label className={selected ? "selected" : ""} key={entry.id}><input type="checkbox" checked={selected} onChange={() => setSelectedDetections((current) => current.includes(entry.id) ? current.filter((id) => id !== entry.id) : current.length < 6 ? [...current, entry.id] : current)} /><HeroPortrait hero={hero} size="small" /><span><strong>{hero?.name}</strong><small>{Math.round(entry.confidence * 100)}% {t.confidence}</small></span><i>{selected ? "✓" : "+"}</i></label>; })}</div> : <div className="ocr-empty">{t.noHeroes}</div>}</>}
+            </div>
+          </div>}
+
+          {screenshotUrl && <div className="import-actions"><label className="rescan-button"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readScreenshot(file); }} />{t.scanAgain}</label><button type="button" onClick={importDetectedHeroes} disabled={!selectedDetections.length || ocrRunning}>{t.importHeroes} ({selectedDetections.length}/6) →</button></div>}
+        </div>
+      </div>}
     </main>
   );
 }
