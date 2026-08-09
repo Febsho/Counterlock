@@ -162,6 +162,8 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .copy-build:disabled { opacity: .35; cursor: not-allowed; }
 .result-actions { display: flex; gap: 8px; }
 .result-actions .copy-build:first-child { border-color: #77736b; color: #d0cabf; }
+.result-actions .full-build-trigger { border-color: var(--red); color: #ff8d85; }
+.result-actions .full-build-trigger.active { background: var(--red); color: white; }
 .match-context { display: grid; grid-template-columns: 1.1fr 1fr; gap: 1px; margin-bottom: 1px; background: #4d4b47; border: 1px solid #4d4b47; }
 .minute-control { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px; padding: 16px 18px; background: #242320; }
 .minute-control > span { min-width: 76px; }
@@ -195,8 +197,56 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .toggle-option input:checked + span { border-color: var(--acid); }
 .toggle-option input:checked + span::after { background: var(--acid); transform: translateX(14px); }
 .advanced-grid p { grid-column: 1 / -1; margin: 0; color: #77736b; font-size: 9px; line-height: 1.45; }
+.full-build-board { margin: 0 0 28px; border: 1px solid #5b5852; background: #11110f; box-shadow: 8px 8px 0 #0b0b0a; }
+.full-build-head { display: flex; align-items: center; justify-content: space-between; gap: 28px; padding: 22px 24px; border-bottom: 1px solid #4d4b47; background: radial-gradient(circle at 78% 0, #d9ff4318, transparent 34%), #20201d; }
+.full-build-head .eyebrow { margin-bottom: 9px; color: var(--acid); }
+.full-build-head h3 { margin: 0; font-size: 24px; letter-spacing: -.04em; text-transform: uppercase; }
+.full-build-head p { margin: 7px 0 0; color: #918c83; font-size: 11px; }
+.build-enemy-lineup { display: flex; flex-direction: row-reverse; padding-left: 18px; }
+.build-enemy-lineup > span { margin-left: -8px; border: 2px solid #20201d; filter: grayscale(.3); }
+.build-enemy-lineup > span.carry { z-index: 2; border-color: var(--red); }
+.build-enemy-lineup .portrait { width: 38px; height: 38px; }
+.build-timeline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow-x: auto; }
+.build-stage { min-width: 285px; padding: 16px; border-right: 1px solid #4d4b47; }
+.build-stage:last-child { border-right: 0; }
+.build-stage-label { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.build-stage-label span { display: grid; place-items: center; width: 24px; height: 24px; background: #3b3935; color: #aaa59c; font: 900 8px/1 monospace; }
+.build-stage.early .build-stage-label span { background: var(--acid); color: var(--ink); }
+.build-stage.mid .build-stage-label span { background: var(--weapon); color: var(--ink); }
+.build-stage.late .build-stage-label span { background: var(--red); color: white; }
+.build-stage-label strong { font: 900 9px/1 monospace; letter-spacing: .08em; }
+.build-stage-items { display: flex; align-items: stretch; gap: 7px; }
+.build-slot { position: relative; flex: 1 1 0; min-width: 0; min-height: 142px; padding: 8px 7px 28px; border: 1px solid #44413c; background: #242320; }
+.build-slot::after { content: "›"; position: absolute; top: 37px; right: -8px; z-index: 2; color: var(--acid); font-size: 18px; }
+.build-slot:last-child::after { display: none; }
+.build-slot.slot-weapon { border-top: 3px solid var(--weapon); }
+.build-slot.slot-vitality { border-top: 3px solid var(--vitality); }
+.build-slot.slot-spirit { border-top: 3px solid var(--spirit); }
+.build-order { position: absolute; top: 5px; left: 6px; z-index: 2; padding: 3px 4px; background: #11110fcc; color: var(--acid); font: 900 7px/1 monospace; }
+.build-item-image { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 8px; background: #35332f; }
+.build-item-image img, .mini-item-image img { width: 88%; height: 88%; object-fit: contain; }
+.build-slot > strong { display: block; overflow: hidden; min-height: 23px; font-size: 9px; line-height: 1.15; text-transform: uppercase; }
+.build-slot > small { margin: 5px 0 0; color: #89847c; font-size: 6px; line-height: 1.3; }
+.build-target { position: absolute; right: 5px; bottom: 5px; border: 1px solid var(--red); }
+.build-target .portrait { width: 22px; height: 22px; }
+.sell-plan { display: grid; grid-template-columns: 190px 1fr; gap: 18px; padding: 16px 20px; border-top: 1px solid #4d4b47; background: #1d1c1a; }
+.sell-plan-title { display: flex; align-items: center; gap: 10px; }
+.sell-plan-title > span { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--red); color: var(--red); font-size: 18px; }
+.sell-plan-title strong { display: block; font: 900 9px/1 monospace; letter-spacing: .08em; }
+.sell-plan-title small { margin: 5px 0 0; color: #77736b; }
+.sell-plan-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.sell-plan-list > p { grid-column: 1 / -1; margin: 0; align-self: center; color: #8d887f; font-size: 10px; }
+.sell-plan-list article { display: grid; grid-template-columns: 1fr 15px 1fr; align-items: center; gap: 5px; min-width: 0; padding: 7px; border: 1px solid #484540; }
+.sell-plan-list article > b { color: var(--acid); text-align: center; }
+.sell-pair-item { display: flex; min-width: 0; align-items: center; gap: 6px; opacity: .65; }
+.sell-pair-item.replacement { opacity: 1; }
+.mini-item-image { flex: 0 0 auto; display: grid; place-items: center; width: 30px; height: 30px; background: #33312e; }
+.sell-pair-item span { min-width: 0; }
+.sell-pair-item small { margin: 0 0 3px; color: var(--red); font-size: 5px; }
+.sell-pair-item.replacement small { color: var(--acid); }
+.sell-pair-item strong { display: block; overflow: hidden; font-size: 7px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .item-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid #4d4b47; }
-.item-card { position: relative; display: grid; grid-template-columns: 34px 58px minmax(130px, 1fr) 75px 68px 72px; align-items: center; gap: 12px; min-height: 112px; padding: 16px 18px 16px 8px; border-bottom: 1px solid #4d4b47; }
+.item-card { position: relative; display: grid; grid-template-columns: 34px 58px minmax(130px, 1fr) 75px 68px 72px; align-items: center; gap: 12px; min-height: 126px; padding: 16px 18px 16px 8px; border-bottom: 1px solid #4d4b47; }
 .item-card:nth-child(odd) { border-right: 1px solid #4d4b47; }
 .item-card::before { content: ""; position: absolute; left: 0; top: 20px; bottom: 20px; width: 3px; background: #888; }
 .item-card.slot-weapon::before { background: var(--weapon); }
@@ -209,6 +259,12 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .item-meta span { color: #969188; font: 700 8px/1 monospace; text-transform: uppercase; letter-spacing: .1em; }
 .item-main h3 { margin: 0; font-size: 15px; line-height: 1.1; text-transform: uppercase; letter-spacing: -.02em; }
 .item-reason { margin-top: 7px; color: #a7a29a; font-size: 10px; }
+.team-item-targets { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+.team-item-targets > small { flex: 0 0 auto; margin: 0; color: #858078; font-size: 6px; }
+.team-item-targets > div { display: flex; gap: 5px; }
+.team-item-targets > div > span { position: relative; display: block; border: 1px solid #5b5751; }
+.team-item-targets .portrait { width: 25px; height: 25px; }
+.team-item-targets b { position: absolute; right: -3px; bottom: -3px; padding: 2px 3px; background: var(--acid); color: var(--ink); font: 900 5px/1 monospace; }
 .item-stat { border-left: 1px solid #464440; padding-left: 10px; }
 .item-stat strong { font: 800 14px/1 monospace; }
 .item-card .item-stat:first-of-type strong { color: var(--acid); }
@@ -335,6 +391,11 @@ footer a { color: inherit; }
   .buy-target-switch > small { text-align: left; }
   .copy-build { width: 100%; }
   .result-actions { width: 100%; flex-direction: column; }
+  .full-build-head { align-items: flex-start; flex-direction: column; }
+  .build-enemy-lineup { flex-direction: row; padding-left: 0; }
+  .build-timeline { grid-template-columns: repeat(3, 285px); }
+  .sell-plan { grid-template-columns: 1fr; }
+  .sell-plan-list { grid-template-columns: 1fr; }
   .phase-tabs { width: 100%; }
   .phase-tabs button { flex: 1; }
   .minute-control { grid-template-columns: 1fr; }

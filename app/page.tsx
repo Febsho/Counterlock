@@ -23,7 +23,8 @@ type Item = {
 };
 type ItemStat = { item_id: number; wins: number; losses: number; matches: number; players: number; avg_buy_time_s: number };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
-type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; carryBuyTime: number; teamBuyTime: number };
+type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
+type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[] };
 type Detection = { id: number; confidence: number };
 type CounterPick = { hero: Hero; score: number; carryRate: number; matches: number; coverage: number };
 
@@ -45,6 +46,7 @@ const copy = {
     matchup: "MATCHUP", games: "GAMES", focus: "FOCUS", items: "ITEMS FOUND",
     winrateLabel: "WIN RATE", buyTime: "BUY TIME", vsCarry: "percentage points vs. hero baseline",
     copyBuild: "COPY TOP BUILD", copied: "BUILD COPIED ✓", share: "SHARE MATCHUP", linkCopied: "LINK COPIED ✓", empty: "No items match these filters. Try a lower sample size.",
+    showFullBuild: "SHOW FULL BUILD", hideFullBuild: "HIDE FULL BUILD", fullBuild: "FULL MATCH BUILD", fullBuildText: "Buy from left to right. The plan adapts to your recommendation target and enemy lineup.", buyOrder: "BUY ORDER", earlyBuys: "EARLY FOUNDATION", midUpgrades: "MID-GAME UPGRADES", lateCore: "LATE-GAME CORE", bestAgainst: "BEST AGAINST", sellPlan: "SELL & REPLACE", sellAt: "SELL AFTER 20 MIN", replaceWith: "REPLACE WITH", noSell: "No early sell is needed for this build yet.",
     methodTitle: "How ranking works:", method: "Carry matchup, the full enemy team, your hero baseline and sample confidence are weighted together. Correlation is not a guarantee—adapt to the actual game state.",
     updated: "UPDATED", assetError: "Hero data is temporarily unavailable.", statsError: "Live statistics are temporarily unavailable. Please try again.",
     footer: "Community project · Data by", disclaimer: "· Not affiliated with Valve.", early: "EARLY", mid: "MID GAME", late: "LATE",
@@ -72,6 +74,7 @@ const copy = {
     matchup: "MATCHUP", games: "SPIELE", focus: "FOKUS", items: "ITEMS GEFUNDEN",
     winrateLabel: "WINRATE", buyTime: "KAUFZEIT", vsCarry: "Prozentpunkte gegen die Helden-Basis",
     copyBuild: "TOP-BUILD KOPIEREN", copied: "BUILD KOPIERT ✓", share: "MATCHUP TEILEN", linkCopied: "LINK KOPIERT ✓", empty: "Keine Items passen zu diesen Filtern. Versuche eine kleinere Stichprobe.",
+    showFullBuild: "VOLLSTÄNDIGEN BUILD ZEIGEN", hideFullBuild: "BUILD AUSBLENDEN", fullBuild: "BUILD FÜR DAS GESAMTE MATCH", fullBuildText: "Von links nach rechts kaufen. Der Plan passt sich an Ziel und Gegnerteam an.", buyOrder: "KAUFREIHENFOLGE", earlyBuys: "EARLY-GRUNDLAGE", midUpgrades: "MID-GAME-UPGRADES", lateCore: "LATE-GAME-KERN", bestAgainst: "AM BESTEN GEGEN", sellPlan: "VERKAUFEN & ERSETZEN", sellAt: "NACH 20 MIN VERKAUFEN", replaceWith: "ERSETZEN DURCH", noSell: "Für diesen Build muss aktuell kein Early-Item verkauft werden.",
     methodTitle: "So wird gerankt:", method: "Carry-Matchup, gesamtes Gegnerteam, Basis-Winrate deines Helden und Stichprobenqualität werden gewichtet. Korrelation ist keine Garantie—passe den Kauf an den Spielstand an.",
     updated: "AKTUALISIERT", assetError: "Heldendaten sind momentan nicht erreichbar.", statsError: "Die Live-Statistiken sind gerade nicht erreichbar. Bitte versuche es erneut.",
     footer: "Community-Projekt · Daten von", disclaimer: "· Nicht mit Valve verbunden.", early: "EARLY", mid: "MID GAME", late: "LATE",
@@ -143,6 +146,7 @@ export default function Home() {
   const [minSample, setMinSample] = useState(250);
   const [sortMode, setSortMode] = useState<SortMode>("recommended");
   const [buyTarget, setBuyTarget] = useState<BuyTarget>("carry");
+  const [showFullBuild, setShowFullBuild] = useState(false);
   const [queueMode, setQueueMode] = useState<QueueMode>("all");
   const [dataWindow, setDataWindow] = useState(30);
   const [laneOnly, setLaneOnly] = useState(false);
@@ -219,16 +223,18 @@ export default function Home() {
       const common = commonParams.toString();
       const matchupParams = new URLSearchParams(commonParams); matchupParams.set("same_lane_filter", String(laneOnly));
       const matchupCommon = matchupParams.toString();
-      const [baseStats, teamStats, carryStats, counterStats] = await Promise.all([
+      const [baseStats, teamStats, carryStats, counterStats, individualEnemyStats] = await Promise.all([
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&${common}`).then((r) => r.json()),
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyIds.join(",")}&${matchupCommon}`).then((r) => r.json()),
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${carryId}&${matchupCommon}`).then((r) => r.json()),
         fetch(`${API}/analytics/hero-counter-stats?${matchupCommon}`).then((r) => r.json()),
-      ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[]];
+        Promise.all(enemyIds.map((enemyId) => fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyId}&${matchupCommon}`).then((r) => r.json() as Promise<ItemStat[]>))),
+      ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[], ItemStat[][]];
       if (runId !== analysisRunRef.current) return;
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
       const carryMap = new Map(carryStats.map((stat) => [stat.item_id, stat]));
+      const individualEnemyMaps = individualEnemyStats.map((stats) => new Map(stats.map((stat) => [stat.item_id, stat])));
       setRecommendations(items.map((item) => {
         const base = baseMap.get(item.id), team = teamMap.get(item.id), carry = carryMap.get(item.id);
         if (!team || !carry) return null;
@@ -237,7 +243,8 @@ export default function Home() {
         const teamConfidence = Math.min(1, Math.log10(Math.max(10, team.matches)) / 4.7);
         const carryUplift = Math.max(-0.06, Math.min(0.06, carryRate - baselineRate));
         const teamUplift = Math.max(-0.06, Math.min(0.06, winRate - baselineRate));
-        return { item, carryScore: (carryRate * .65 + winRate * .15 + baselineRate * .2 + carryUplift * .35) * carryConfidence, teamScore: (winRate * .7 + carryRate * .1 + baselineRate * .2 + teamUplift * .35) * teamConfidence, teamRate: winRate, baselineRate, carryRate, carryMatches: carry.matches, teamMatches: team.matches, carryBuyTime: carry.avg_buy_time_s, teamBuyTime: team.avg_buy_time_s } satisfies Recommendation;
+        const enemyRates = enemyIds.map((enemyId, index) => { const stat = individualEnemyMaps[index].get(item.id); const rate = adjustedRate(stat); return stat ? { heroId: enemyId, rate, matches: stat.matches, lift: rate - baselineRate } : null; }).filter((entry): entry is EnemyItemRate => Boolean(entry)).sort((a, b) => b.lift - a.lift);
+        return { item, carryScore: (carryRate * .65 + winRate * .15 + baselineRate * .2 + carryUplift * .35) * carryConfidence, teamScore: (winRate * .7 + carryRate * .1 + baselineRate * .2 + teamUplift * .35) * teamConfidence, teamRate: winRate, baselineRate, carryRate, carryMatches: carry.matches, teamMatches: team.matches, carryBuyTime: carry.avg_buy_time_s, teamBuyTime: team.avg_buy_time_s, enemyRates } satisfies Recommendation;
       }).filter((value): value is Recommendation => Boolean(value)));
       setAllCounterStats(counterStats);
       setMatchup(counterStats.find((stat) => stat.hero_id === heroId && stat.enemy_hero_id === carryId) ?? null);
@@ -254,6 +261,20 @@ export default function Home() {
     const filtered = recommendations.filter((entry) => { const value = values(entry); return value.buyTime >= start && value.buyTime <= end && value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
     return filtered.sort((a, b) => { const av = values(a), bv = values(b); return sortMode === "winrate" ? bv.rate - av.rate : sortMode === "sample" ? bv.matches - av.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : bv.score - av.score; }).slice(0, resultCount);
   }, [buyTarget, category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
+
+  const fullBuildPlan = useMemo(() => {
+    const values = (entry: Recommendation) => buyTarget === "team" ? { rate: entry.teamRate, matches: entry.teamMatches, buyTime: entry.teamBuyTime, score: entry.teamScore } : { rate: entry.carryRate, matches: entry.carryMatches, buyTime: entry.carryBuyTime, score: entry.carryScore };
+    const pool = recommendations.filter((entry) => { const value = values(entry); return value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
+    const used = new Set<number>();
+    const take = (matchesPhase: (entry: Recommendation, buyTime: number) => boolean, count: number) => pool.filter((entry) => !used.has(entry.item.id) && matchesPhase(entry, values(entry).buyTime)).sort((a, b) => values(b).score - values(a).score).slice(0, count).sort((a, b) => values(a).buyTime - values(b).buyTime).map((entry) => { used.add(entry.item.id); return entry; });
+    const early = take((entry, buyTime) => buyTime < 720 || (entry.item.item_tier ?? 0) === 1, 4);
+    const mid = take((entry, buyTime) => (buyTime >= 600 && buyTime < 1260) || (entry.item.item_tier ?? 0) === 2, 4);
+    let late = take((entry, buyTime) => buyTime >= 1080 || (entry.item.item_tier ?? 0) >= 3, 4);
+    if (late.length < 4) late = [...late, ...take((entry) => (entry.item.item_tier ?? 0) >= 2, 4 - late.length)];
+    const upgrades = [...late, ...mid].filter((entry) => (entry.item.cost ?? 0) >= 3200);
+    const sellSuggestions = early.filter((entry) => (entry.item.cost ?? 0) <= 1600).map((sell) => ({ sell, replacement: upgrades.find((upgrade) => upgrade.item.item_slot_type === sell.item.item_slot_type) })).filter((entry): entry is { sell: Recommendation; replacement: Recommendation } => Boolean(entry.replacement)).slice(0, 3);
+    return { early, mid, late, sellSuggestions, values };
+  }, [buyTarget, category, itemTier, maxBudget, minSample, positiveLiftOnly, recommendations]);
 
   const counterPicks = useMemo<CounterPick[]>(() => {
     if (!allCounterStats.length || !enemyIds.length) return [];
@@ -390,7 +411,7 @@ export default function Home() {
       </section>}
 
       <section className="results" aria-live="polite">
-        <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {buyTarget === "team" ? t.enemyLineup : carryHero?.name}</span></h2></div><div className="result-controls"><div className="buy-target-switch" aria-label={t.buyTarget}><small>{t.buyTarget}</small><div><button className={buyTarget === "carry" ? "active" : ""} type="button" onClick={() => setBuyTarget("carry")}>{t.vsCarryMode}</button><button className={buyTarget === "team" ? "active" : ""} type="button" onClick={() => setBuyTarget("team")}>{t.vsTeamMode}</button></div></div><div className="result-actions"><button className="copy-build" onClick={shareMatchup}>{linkCopied ? t.linkCopied : t.share}</button><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div></div></div>
+        <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {buyTarget === "team" ? t.enemyLineup : carryHero?.name}</span></h2></div><div className="result-controls"><div className="buy-target-switch" aria-label={t.buyTarget}><small>{t.buyTarget}</small><div><button className={buyTarget === "carry" ? "active" : ""} type="button" onClick={() => setBuyTarget("carry")}>{t.vsCarryMode}</button><button className={buyTarget === "team" ? "active" : ""} type="button" onClick={() => setBuyTarget("team")}>{t.vsTeamMode}</button></div></div><div className="result-actions"><button className={`copy-build full-build-trigger ${showFullBuild ? "active" : ""}`} type="button" onClick={() => setShowFullBuild((current) => !current)}>{showFullBuild ? t.hideFullBuild : t.showFullBuild}</button><button className="copy-build" onClick={shareMatchup}>{linkCopied ? t.linkCopied : t.share}</button><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div></div></div>
 
         <div className="match-context">
           <label className="minute-control"><span><small>{t.currentMinute}</small><strong>{gameMinute}:00</strong></span><input type="range" min="1" max="40" value={gameMinute} onChange={(event) => setGameMinute(Number(event.target.value))} /><div className="phase-tabs">{(["early", "mid", "late"] as Phase[]).map((value) => <button type="button" key={value} className={phase === value ? "active" : ""} onClick={() => setGameMinute(value === "early" ? 7 : value === "mid" ? 15 : 26)}>{t[value]}</button>)}</div></label>
@@ -408,10 +429,20 @@ export default function Home() {
           </div>
         </details>
 
+        {showFullBuild && !loading && !error && <section className="full-build-board">
+          <div className="full-build-head"><div><div className="eyebrow">{t.buyOrder} · {buyTarget === "team" ? t.vsTeamMode : t.vsCarryMode}</div><h3>{t.fullBuild}</h3><p>{t.fullBuildText}</p></div><div className="build-enemy-lineup">{enemyIds.map((id) => <span key={id} className={id === carryId ? "carry" : ""} title={heroMap.get(id)?.name}><HeroPortrait hero={heroMap.get(id)} size="small" /></span>)}</div></div>
+          <div className="build-timeline">{([
+            { key: "early", label: t.earlyBuys, items: fullBuildPlan.early, offset: 0 },
+            { key: "mid", label: t.midUpgrades, items: fullBuildPlan.mid, offset: fullBuildPlan.early.length },
+            { key: "late", label: t.lateCore, items: fullBuildPlan.late, offset: fullBuildPlan.early.length + fullBuildPlan.mid.length },
+          ] as const).map((stage) => <section className={`build-stage ${stage.key}`} key={stage.key}><div className="build-stage-label"><span>{stage.key === "early" ? "01" : stage.key === "mid" ? "02" : "03"}</span><strong>{stage.label}</strong></div><div className="build-stage-items">{stage.items.map((entry, index) => { const target = entry.enemyRates[0]; return <article className={`build-slot slot-${entry.item.item_slot_type}`} key={entry.item.id}><div className="build-order">{String(stage.offset + index + 1).padStart(2, "0")}</div><div className="build-item-image">{entry.item.shop_image_webp ? <img src={entry.item.shop_image_webp} alt="" /> : "◆"}</div><strong>{entry.item.name}</strong><small>{formatTime(fullBuildPlan.values(entry).buyTime, lang)} · ◈ {entry.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</small>{buyTarget === "team" && target && <span className="build-target" title={`${t.bestAgainst} ${heroMap.get(target.heroId)?.name}`}><HeroPortrait hero={heroMap.get(target.heroId)} size="small" /></span>}</article>; })}</div></section>)}</div>
+          <div className="sell-plan"><div className="sell-plan-title"><span>↻</span><div><strong>{t.sellPlan}</strong><small>{t.sellAt}</small></div></div><div className="sell-plan-list">{fullBuildPlan.sellSuggestions.length ? fullBuildPlan.sellSuggestions.map(({ sell, replacement }) => <article key={`${sell.item.id}-${replacement.item.id}`}><div className="sell-pair-item"><div className="mini-item-image">{sell.item.shop_image_webp ? <img src={sell.item.shop_image_webp} alt="" /> : "◆"}</div><span><small>SELL</small><strong>{sell.item.name}</strong></span></div><b>→</b><div className="sell-pair-item replacement"><div className="mini-item-image">{replacement.item.shop_image_webp ? <img src={replacement.item.shop_image_webp} alt="" /> : "◆"}</div><span><small>{t.replaceWith}</small><strong>{replacement.item.name}</strong></span></div></article>) : <p>{t.noSell}</p>}</div></div>
+        </section>}
+
         {error && <div className="error-card">{error}</div>}
         {!error && loading && <div className="loading-grid">{[1,2,3,4].map((n) => <div key={n} />)}</div>}
         {!error && !loading && !visibleRecommendations.length && <div className="empty-card">{t.empty}</div>}
-        {!error && !loading && Boolean(visibleRecommendations.length) && <div className="item-grid">{visibleRecommendations.map((entry, index) => { const rate = buyTarget === "team" ? entry.teamRate : entry.carryRate; const matches = buyTarget === "team" ? entry.teamMatches : entry.carryMatches; const buyTime = buyTarget === "team" ? entry.teamBuyTime : entry.carryBuyTime; const lift = (rate - entry.baselineRate) * 100; return <article className={`item-card slot-${entry.item.item_slot_type}`} key={entry.item.id}><div className="rank">#{String(index + 1).padStart(2, "0")}</div><div className="item-icon">{entry.item.shop_image_webp ? <img src={entry.item.shop_image_webp} alt="" /> : <span>◆</span>}</div><div className="item-main"><div className="item-meta"><span>{entry.item.item_slot_type && t[entry.item.item_slot_type]}</span><span>{buyTarget === "team" ? t.vsTeamMode : t.vsCarryMode}</span><span>T{entry.item.item_tier}</span></div><h3>{entry.item.name}</h3><div className="item-reason">{lift >= 0 ? "+" : ""}{lift.toFixed(1)} {buyTarget === "team" ? t.vsTeam : t.vsCarry}</div></div><div className="item-stat"><small>{t.winrateLabel}</small><strong>{pct(rate)}</strong></div><div className="item-stat"><small>{t.sample}</small><strong>{formatMatches(matches, lang)}</strong></div><div className="item-stat"><small>{t.buyTime}</small><strong>{formatTime(buyTime, lang)}</strong></div><div className="cost">◈ {entry.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</div></article>; })}</div>}
+        {!error && !loading && Boolean(visibleRecommendations.length) && <div className="item-grid">{visibleRecommendations.map((entry, index) => { const rate = buyTarget === "team" ? entry.teamRate : entry.carryRate; const matches = buyTarget === "team" ? entry.teamMatches : entry.carryMatches; const buyTime = buyTarget === "team" ? entry.teamBuyTime : entry.carryBuyTime; const lift = (rate - entry.baselineRate) * 100; return <article className={`item-card slot-${entry.item.item_slot_type}`} key={entry.item.id}><div className="rank">#{String(index + 1).padStart(2, "0")}</div><div className="item-icon">{entry.item.shop_image_webp ? <img src={entry.item.shop_image_webp} alt="" /> : <span>◆</span>}</div><div className="item-main"><div className="item-meta"><span>{entry.item.item_slot_type && t[entry.item.item_slot_type]}</span><span>{buyTarget === "team" ? t.vsTeamMode : t.vsCarryMode}</span><span>T{entry.item.item_tier}</span></div><h3>{entry.item.name}</h3><div className="item-reason">{lift >= 0 ? "+" : ""}{lift.toFixed(1)} {buyTarget === "team" ? t.vsTeam : t.vsCarry}</div>{buyTarget === "team" && Boolean(entry.enemyRates.length) && <div className="team-item-targets"><small>{t.bestAgainst}</small><div>{entry.enemyRates.slice(0, 2).map((target) => <span key={target.heroId} title={`${heroMap.get(target.heroId)?.name} · ${pct(target.rate)}`}><HeroPortrait hero={heroMap.get(target.heroId)} size="small" /><b>{target.lift >= 0 ? "+" : ""}{(target.lift * 100).toFixed(1)}</b></span>)}</div></div>}</div><div className="item-stat"><small>{t.winrateLabel}</small><strong>{pct(rate)}</strong></div><div className="item-stat"><small>{t.sample}</small><strong>{formatMatches(matches, lang)}</strong></div><div className="item-stat"><small>{t.buyTime}</small><strong>{formatTime(buyTime, lang)}</strong></div><div className="cost">◈ {entry.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</div></article>; })}</div>}
 
         <div className="method-note"><span>i</span><p><strong>{t.methodTitle}</strong> {t.method}</p>{updatedAt && <time>{t.updated} {updatedAt.toLocaleTimeString(lang === "de" ? "de-DE" : "en-US", { hour: "2-digit", minute: "2-digit" })}</time>}</div>
       </section>
