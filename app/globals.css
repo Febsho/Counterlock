@@ -63,8 +63,44 @@ h1 em { color: var(--red); font-style: italic; font-weight: 950; }
 .match-import-bar p { margin: 0; }
 .match-import-bar p strong { display: block; margin-bottom: 5px; font: 900 10px/1 monospace; letter-spacing: .08em; }
 .match-import-bar p small { margin: 0; color: #aaa59c; font-size: 7px; line-height: 1.35; }
-.match-import-bar > button { min-height: 40px; padding: 10px 16px; border: 2px solid var(--acid); background: var(--acid); color: var(--ink); font: 900 8px/1 monospace; letter-spacing: .07em; cursor: pointer; }
-.match-import-bar > button b { margin-left: 7px; padding: 3px 5px; background: var(--ink); color: var(--acid); font-size: 7px; }
+.match-import-actions { display: flex; gap: 8px; }
+.match-import-actions button { min-height: 40px; padding: 10px 16px; border: 2px solid var(--acid); background: var(--acid); color: var(--ink); font: 900 8px/1 monospace; letter-spacing: .07em; cursor: pointer; }
+.match-import-actions button:last-child { border-color: #77736b; background: transparent; color: var(--paper); }
+.match-import-actions button b { margin-left: 7px; padding: 3px 5px; background: var(--ink); color: var(--acid); font-size: 7px; }
+.live-import-panel { position: relative; display: grid; grid-template-columns: minmax(240px, .75fr) minmax(360px, 1fr); gap: 18px 36px; padding: 28px clamp(20px, 5vw, 76px); border-bottom: 2px solid var(--ink); background: #e7e1d4; }
+.live-import-copy h2 { margin-top: 8px; font-size: clamp(24px, 3vw, 40px); }
+.live-import-copy p { max-width: 500px; margin: 9px 0 0; color: #625e57; font-size: 11px; line-height: 1.5; }
+.live-import-close { position: absolute; top: 10px; right: 14px; width: 28px; height: 28px; border: 1px solid #9f988d; background: transparent; color: var(--ink); font-size: 18px; cursor: pointer; }
+.live-import-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-self: end; gap: 8px; }
+.live-import-form label { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; min-height: 48px; border: 2px solid var(--ink); background: var(--paper); }
+.live-import-form label span { padding: 0 12px; border-right: 1px solid #aaa398; font: 900 8px/1 monospace; letter-spacing: .08em; }
+.live-import-form input { width: 100%; min-width: 0; padding: 0 13px; border: 0; outline: 0; background: transparent; font-size: 13px; }
+.live-import-form > button { padding: 0 20px; border: 2px solid var(--ink); background: var(--acid); color: var(--ink); font: 900 9px/1 monospace; letter-spacing: .07em; cursor: pointer; }
+.live-import-form > button:disabled { opacity: .5; cursor: wait; }
+.saved-steam-profile { grid-column: 1 / -1; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto; align-items: center; gap: 9px; min-height: 52px; padding: 6px; border: 1px solid #aaa398; background: #f6f2e8; }
+.saved-steam-profile img, .steam-candidates img { width: 38px; height: 38px; background: #d1cabf; object-fit: cover; }
+.steam-avatar-fallback { display: grid; place-items: center; width: 38px; height: 38px; background: var(--ink); color: var(--acid); font: normal 900 14px/1 monospace; }
+.saved-steam-profile span small, .saved-steam-profile span strong { display: block; }
+.saved-steam-profile span strong { margin-top: 4px; font-size: 12px; }
+.saved-steam-profile button { min-height: 34px; padding: 8px 11px; border: 1px solid var(--ink); background: var(--ink); color: var(--acid); font: 900 7px/1 monospace; letter-spacing: .06em; cursor: pointer; }
+.saved-steam-profile button:last-child { border-color: #aaa398; background: transparent; color: #625e57; }
+.steam-candidates { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+.steam-candidates > small { grid-column: 1 / -1; }
+.steam-candidates > button { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; padding: 6px; border: 1px solid #aaa398; background: #f6f2e8; color: var(--ink); text-align: left; cursor: pointer; }
+.steam-candidates > button:hover { border-color: var(--ink); background: var(--acid); }
+.steam-candidates span { min-width: 0; }
+.steam-candidates span strong, .steam-candidates span small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steam-candidates span strong { font-size: 10px; }
+.steam-candidates span small { margin-top: 4px; }
+.steam-candidates b { grid-column: 1 / -1; padding-top: 5px; border-top: 1px solid #d1cabf; font: 900 6px/1 monospace; letter-spacing: .05em; }
+.live-import-message { grid-column: 1 / -1; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #c19b39; background: #fff3c9; }
+.live-import-message.success { border-color: #4b9c5a; background: #e4f5df; }
+.live-import-message > span { display: grid; place-items: center; width: 28px; height: 28px; background: #c19b39; color: white; font: 900 14px/1 monospace; }
+.live-import-message.success > span { background: #4b9c5a; }
+.live-import-message p { margin: 0; }
+.live-import-message strong, .live-import-message small { display: block; }
+.live-import-message small { margin: 4px 0 0; color: #625e57; line-height: 1.4; }
+.live-import-message > button { min-height: 32px; padding: 8px 11px; border: 1px solid var(--ink); background: transparent; font: 900 7px/1 monospace; cursor: pointer; }
 
 .analyzer { display: grid; grid-template-columns: .76fr 1fr 1.18fr 1fr; border-bottom: 2px solid var(--ink); }
 .step-block { min-height: 270px; padding: 26px clamp(16px, 1.9vw, 30px); border-right: 2px solid var(--ink); }
@@ -507,7 +543,11 @@ footer a { color: inherit; }
   .hero-section { padding-top: 52px; }
   .hero-section::after { display: none; }
   .match-import-bar { align-items: stretch; flex-direction: column; }
-  .match-import-bar > button { width: 100%; }
+  .match-import-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .live-import-panel { grid-template-columns: 1fr; }
+  .live-import-form { grid-template-columns: 1fr; }
+  .live-import-form > button { min-height: 44px; }
+  .steam-candidates { grid-template-columns: 1fr 1fr; }
   .analyzer { display: block; }
   .step-block { min-height: auto; border-right: 0; border-bottom: 2px solid var(--ink); }
   .carry-block { border-top: 0; }
