@@ -598,6 +598,12 @@ export default function Home() {
         await importLiveMatch(profile); return;
       }
       const vanityName = query.match(/steamcommunity\.com\/id\/([^/?#]+)/i)?.[1];
+      if (vanityName) {
+        const resolver = new URL("api/steam-resolve", window.location.href);
+        resolver.searchParams.set("url", query);
+        const resolved = await fetch(resolver);
+        if (resolved.ok) { await importLiveMatch(await resolved.json() as SteamProfile); return; }
+      }
       const searchQuery = decodeURIComponent(vanityName ?? query);
       const response = await fetch(`${API}/players/steam-search?search_query=${encodeURIComponent(searchQuery)}&limit=5&min_matches_played_last_30d=0`);
       if (!response.ok) { setLiveImportMessage(t.steamProfileMissing); return; }

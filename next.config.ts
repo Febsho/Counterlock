@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
   assetPrefix: basePath || undefined,
   trailingSlash: isGitHubPages,
   images: { unoptimized: isGitHubPages },
+  // GitHub Pages is static-only; exclude the Steam URL resolver route there.
+  pageExtensions: isGitHubPages ? ["tsx"] : undefined,
 };
 
 export default nextConfig;
