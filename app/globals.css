@@ -169,7 +169,8 @@ select { width: 100%; border: 0; background: transparent; color: var(--ink); fon
 .lane-board-actions .lane-text-green { color: #328044; }
 .lane-board-actions > button { min-height: 43px; padding: 10px 16px; border: 2px solid var(--ink); background: var(--ink); color: var(--acid); font: 900 8px/1 monospace; letter-spacing: .08em; cursor: pointer; }
 .lane-columns { display: grid; grid-template-columns: repeat(3, 1fr); }
-.lane-column { min-width: 0; padding: 16px clamp(12px, 2vw, 28px) 22px; border-right: 1px solid #9f988d; }
+.lane-column { min-width: 0; padding: 16px clamp(12px, 2vw, 28px) 22px; border-right: 1px solid #9f988d; transition: background .15s, box-shadow .15s; }
+.lane-column.is-drop-target { background: #d9ff431c; box-shadow: inset 0 0 0 3px var(--acid); }
 .lane-column:last-child { border-right: 0; }
 .lane-column-title { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .lane-column-title > span { width: 11px; height: 11px; border-radius: 50%; }
@@ -177,19 +178,26 @@ select { width: 100%; border: 0; background: transparent; color: var(--ink); fon
 .lane-column-blue .lane-column-title > span { background: #4b8fe8; }
 .lane-column-green .lane-column-title > span { background: #55b96a; }
 .lane-column-title strong { font: 900 10px/1 monospace; letter-spacing: .08em; }
-.lane-column-title b { margin-left: auto; color: #777168; font: 900 8px/1 monospace; }
+.lane-column-title b { color: #777168; font: 900 8px/1 monospace; }
+.lane-rate { display: flex; align-items: baseline; gap: 7px; margin-left: auto; }
+.lane-rate small { color: #777168; font: 800 6px/1 monospace; letter-spacing: .06em; }
+.lane-rate em { color: var(--ink); font: normal 900 11px/1 monospace; }
+.lane-drop-hint { display: grid; place-items: center; min-height: 42px; margin: 0 0 8px; border: 2px dashed #839d25; color: #5e740d; font: 900 8px/1 monospace; letter-spacing: .08em; }
 .lane-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .lane-side > small { grid-column: 1 / -1; margin: 0 0 2px; color: #777168; }
-.lane-side article { position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr) 25px; align-items: center; gap: 7px; min-width: 0; min-height: 48px; padding: 4px; border: 1px solid #aaa398; background: #f6f2e8; }
+.lane-side article { position: relative; display: grid; grid-template-columns: 38px minmax(0, 1fr) 25px; align-items: center; gap: 7px; min-width: 0; min-height: 48px; padding: 4px; border: 1px solid #aaa398; background: #f6f2e8; cursor: grab; user-select: none; transition: border-color .12s, box-shadow .12s, opacity .12s, transform .12s; }
+.lane-side article:hover, .lane-side article:focus-visible { border-color: var(--ink); box-shadow: 3px 3px 0 var(--ink); outline: 0; transform: translate(-1px, -1px); }
+.lane-side article:active { cursor: grabbing; }
+.lane-side article.is-dragging { opacity: .35; transform: scale(.97); }
 .lane-side article.is-you { border: 2px solid var(--vitality); background: #eaf5e5; }
 .lane-side article.is-opponent { border: 2px solid var(--red); background: #fff0e9; }
 .lane-side .portrait { width: 38px; height: 40px; }
 .lane-side article > span { min-width: 0; }
 .lane-side article > span small { margin-bottom: 3px; font-size: 6px; }
 .lane-side article > span strong { display: block; overflow: hidden; text-transform: uppercase; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.lane-side article select { width: 25px; height: 28px; border: 1px solid #aaa398; background: #e9e3d7; font: 900 8px/1 monospace; text-align: center; }
 .enemy-side article { grid-template-columns: 38px minmax(0, 1fr) 22px 25px; }
 .enemy-side article > button { width: 22px; height: 28px; border: 0; background: transparent; color: var(--red); font-weight: 900; cursor: pointer; }
+.drag-handle { display: grid; place-items: center; width: 25px; height: 30px; border: 1px solid #aaa398; background: #e9e3d7; color: #6f6a62; font: normal 900 15px/1 monospace; }
 .lane-versus { position: relative; margin: 8px 0; color: #8a847b; font: 900 7px/1 monospace; text-align: center; }
 .lane-versus::before, .lane-versus::after { content: ""; position: absolute; top: 50%; width: calc(50% - 18px); height: 1px; background: #bcb5aa; }
 .lane-versus::before { left: 0; }

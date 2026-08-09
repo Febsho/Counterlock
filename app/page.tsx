@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
 
 const API = "https://api.deadlock-api.com/v1";
 
@@ -51,7 +51,8 @@ const copy = {
     weapon: "Weapon", vitality: "Vitality", spirit: "Spirit", minSample: "MIN. SAMPLE", sort: "SORT BY",
     recommended: "Recommended", buytimeSort: "Buy time", winrate: "Win rate", sample: "Sample size", cost: "Cost",
     laneSetup: "LANE SETUP", lane: "YOUR LANE", laneOpponent: "LANE OPPONENT", anyLane: "Any lane", blue: "Blue", green: "Green", yellow: "Yellow", purple: "Purple",
-    laneBoard: "LANE ASSIGNMENTS", laneBoardText: "Move heroes between lanes. Your hero's lane controls same-lane matchup statistics.", autoPositions: "AUTO BY POSITION", alliesLabel: "YOUR SIDE", enemiesLabel: "ENEMY SIDE", yourLane: "YOUR LANE", markLaneOpponent: "MARK LANE OPPONENT",
+    laneBoard: "LANE ASSIGNMENTS", laneBoardText: "Drag hero cards between lanes. Your hero's lane controls same-lane matchup statistics.", autoPositions: "AUTO BY POSITION", alliesLabel: "YOUR SIDE", enemiesLabel: "ENEMY SIDE", yourLane: "YOUR LANE", markLaneOpponent: "MARK LANE OPPONENT", dragHero: "Drag to another lane. Use Left or Right Arrow with the card focused.", dropHere: "DROP HERO HERE",
+    laneWinRate: "EST. LANE WIN RATE", laneWinHint: "Average of same-lane hero matchups",
     matchup: "MATCHUP", games: "GAMES", focus: "FOCUS", items: "ITEMS FOUND",
     winrateLabel: "WIN RATE", buyTime: "BUY TIME", vsCarry: "percentage points vs. hero baseline",
     copyBuild: "COPY TOP BUILD", copied: "BUILD COPIED ✓", share: "SHARE MATCHUP", linkCopied: "LINK COPIED ✓", empty: "No items match these filters. Try a lower sample size.",
@@ -85,7 +86,8 @@ const copy = {
     weapon: "Waffe", vitality: "Vitalität", spirit: "Spirit", minSample: "MIN. STICHPROBE", sort: "SORTIERUNG",
     recommended: "Empfehlung", buytimeSort: "Kaufzeit", winrate: "Winrate", sample: "Stichprobe", cost: "Kosten",
     laneSetup: "LANE-SETUP", lane: "DEINE LANE", laneOpponent: "LANE-GEGNER", anyLane: "Beliebige Lane", blue: "Blau", green: "Grün", yellow: "Gelb", purple: "Lila",
-    laneBoard: "LANE-ZUORDNUNG", laneBoardText: "Verschiebe Helden zwischen den Lanes. Die Lane deines Helden steuert die Same-Lane-Statistiken.", autoPositions: "AUTO NACH POSITION", alliesLabel: "DEINE SEITE", enemiesLabel: "GEGNERSEITE", yourLane: "DEINE LANE", markLaneOpponent: "ALS LANE-GEGNER MARKIEREN",
+    laneBoard: "LANE-ZUORDNUNG", laneBoardText: "Ziehe Heldenkarten zwischen den Lanes. Die Lane deines Helden steuert die Same-Lane-Statistiken.", autoPositions: "AUTO NACH POSITION", alliesLabel: "DEINE SEITE", enemiesLabel: "GEGNERSEITE", yourLane: "DEINE LANE", markLaneOpponent: "ALS LANE-GEGNER MARKIEREN", dragHero: "In eine andere Lane ziehen. Mit Fokus funktionieren auch die Pfeiltasten Links und Rechts.", dropHere: "HELD HIER ABLEGEN",
+    laneWinRate: "GESCHÄTZTE LANE-WINRATE", laneWinHint: "Durchschnitt der Same-Lane-Heldenduelle",
     matchup: "MATCHUP", games: "SPIELE", focus: "FOKUS", items: "ITEMS GEFUNDEN",
     winrateLabel: "WINRATE", buyTime: "KAUFZEIT", vsCarry: "Prozentpunkte gegen die Helden-Basis",
     copyBuild: "TOP-BUILD KOPIEREN", copied: "BUILD KOPIERT ✓", share: "MATCHUP TEILEN", linkCopied: "LINK KOPIERT ✓", empty: "Keine Items passen zu diesen Filtern. Versuche eine kleinere Stichprobe.",
@@ -306,6 +308,8 @@ export default function Home() {
   const [lane, setLane] = useState<Lane>("all");
   const [laneOpponentId, setLaneOpponentId] = useState(13);
   const [laneAssignments, setLaneAssignments] = useState<Record<number, Exclude<Lane, "all">>>({});
+  const [draggedHeroId, setDraggedHeroId] = useState<number | null>(null);
+  const [dragOverLane, setDragOverLane] = useState<Exclude<Lane, "all"> | null>(null);
   const [maxBudget, setMaxBudget] = useState(0);
   const [itemTier, setItemTier] = useState(0);
   const [resultCount, setResultCount] = useState(8);
@@ -313,6 +317,7 @@ export default function Home() {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [matchup, setMatchup] = useState<CounterStat | null>(null);
   const [allCounterStats, setAllCounterStats] = useState<CounterStat[]>([]);
+  const [laneCounterStats, setLaneCounterStats] = useState<CounterStat[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -402,13 +407,15 @@ export default function Home() {
       const common = commonParams.toString();
       const matchupParams = new URLSearchParams(commonParams); matchupParams.set("same_lane_filter", String(laneOnly));
       const matchupCommon = matchupParams.toString();
-      const [baseStats, teamStats, carryStats, counterStats, individualEnemyStats] = await Promise.all([
+      const laneCounterParams = new URLSearchParams(commonParams); laneCounterParams.set("same_lane_filter", "true");
+      const [baseStats, teamStats, carryStats, counterStats, laneStats, individualEnemyStats] = await Promise.all([
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&${common}`).then((r) => r.json()),
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyIds.join(",")}&${matchupCommon}`).then((r) => r.json()),
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${carryId}&${matchupCommon}`).then((r) => r.json()),
         fetch(`${API}/analytics/hero-counter-stats?${matchupCommon}`).then((r) => r.json()),
+        fetch(`${API}/analytics/hero-counter-stats?${laneCounterParams}`).then((r) => r.json()),
         Promise.all(enemyIds.map((enemyId) => fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyId}&${matchupCommon}`).then((r) => r.json() as Promise<ItemStat[]>))),
-      ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[], ItemStat[][]];
+      ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[], CounterStat[], ItemStat[][]];
       if (runId !== analysisRunRef.current) return;
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
@@ -426,6 +433,7 @@ export default function Home() {
         return { item, carryScore: (carryRate * .65 + winRate * .15 + baselineRate * .2 + carryUplift * .35) * carryConfidence, teamScore: (winRate * .7 + carryRate * .1 + baselineRate * .2 + teamUplift * .35) * teamConfidence, teamRate: winRate, baselineRate, carryRate, carryMatches: carry.matches, teamMatches: team.matches, carryBuyTime: carry.avg_buy_time_s, teamBuyTime: team.avg_buy_time_s, enemyRates } satisfies Recommendation;
       }).filter((value): value is Recommendation => Boolean(value)));
       setAllCounterStats(counterStats);
+      setLaneCounterStats(laneStats);
       setMatchup(counterStats.find((stat) => stat.hero_id === heroId && stat.enemy_hero_id === carryId) ?? null);
       setUpdatedAt(new Date());
     } catch { if (runId === analysisRunRef.current) setError(copy[lang].statsError); }
@@ -528,6 +536,10 @@ export default function Home() {
     assign(allyTeamIds); assign(enemyIds); setLaneAssignments(next);
   }
   function updateHeroLane(id: number, value: Exclude<Lane, "all">) { setLaneAssignments((current) => ({ ...current, [id]: value })); }
+  function startHeroDrag(event: DragEvent<HTMLElement>, id: number) { setDraggedHeroId(id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(id)); }
+  function finishHeroDrag() { setDraggedHeroId(null); setDragOverLane(null); }
+  function dropHero(event: DragEvent<HTMLElement>, value: Exclude<Lane, "all">) { event.preventDefault(); const id = Number(event.dataTransfer.getData("text/plain") || draggedHeroId); if (allMatchHeroIds.includes(id)) updateHeroLane(id, value); finishHeroDrag(); }
+  function moveHeroByKey(event: KeyboardEvent<HTMLElement>, id: number) { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; event.preventDefault(); const lanes = ["yellow", "blue", "green"] as const; const current = lanes.indexOf(laneAssignments[id] ?? "yellow"); const offset = event.key === "ArrowRight" ? 1 : -1; updateHeroLane(id, lanes[(current + offset + lanes.length) % lanes.length]); }
   async function readScreenshot(file: File, target: ImportTarget = importTarget) {
     if (!file.type.startsWith("image/")) return;
     if (screenshotUrl) URL.revokeObjectURL(screenshotUrl);
@@ -609,6 +621,17 @@ export default function Home() {
   }
 
   const matchupWinRate = matchup ? matchup.wins / matchup.matches_played : null;
+  const laneWinRates = useMemo(() => {
+    const stats = new Map(laneCounterStats.map((entry) => [`${entry.hero_id}:${entry.enemy_hero_id}`, entry]));
+    return Object.fromEntries((["yellow", "blue", "green"] as const).map((laneKey) => {
+      const allies = allyTeamIds.filter((id) => laneAssignments[id] === laneKey);
+      const enemies = enemyIds.filter((id) => laneAssignments[id] === laneKey);
+      const matchups = allies.flatMap((allyId) => enemies.map((enemyId) => stats.get(`${allyId}:${enemyId}`))).filter((entry): entry is CounterStat => Boolean(entry?.matches_played));
+      const totalWeight = matchups.reduce((sum, entry) => sum + Math.sqrt(entry.matches_played), 0);
+      const rate = totalWeight ? matchups.reduce((sum, entry) => sum + ((entry.wins + 40) / (entry.matches_played + 80)) * Math.sqrt(entry.matches_played), 0) / totalWeight : null;
+      return [laneKey, rate];
+    })) as Record<"yellow" | "blue" | "green", number | null>;
+  }, [allyTeamIds, enemyIds, laneAssignments, laneCounterStats]);
   return (
     <main>
       <header className="site-header">
@@ -658,7 +681,16 @@ export default function Home() {
 
       <section className="lane-board">
         <div className="lane-board-head"><div><div className="eyebrow">05 · {t.laneSetup} · {allMatchHeroIds.length}/12</div><h2>{t.laneBoard}</h2><p>{t.laneBoardText}</p></div><div className="lane-board-actions"><span><small>{t.yourLane}</small><strong className={`lane-text-${lane}`}>{lane === "all" ? t.anyLane : t[lane]}</strong></span><button type="button" onClick={autoAssignLanes}>{t.autoPositions}</button></div></div>
-        <div className="lane-columns">{(["yellow", "blue", "green"] as const).map((laneKey) => { const allyLane = allyTeamIds.filter((id) => laneAssignments[id] === laneKey); const enemyLane = enemyIds.filter((id) => laneAssignments[id] === laneKey); return <section className={`lane-column lane-column-${laneKey}`} key={laneKey}><div className="lane-column-title"><span /><strong>{t[laneKey]} {lang === "de" ? "LANE" : "LANE"}</strong><b>{allyLane.length}v{enemyLane.length}</b></div><div className="lane-side ally-side"><small>{t.alliesLabel}</small>{allyLane.map((id) => { const hero = heroMap.get(id); return <article className={id === heroId ? "is-you" : ""} key={id}><HeroPortrait hero={hero} size="small" /><span><small>{id === heroId ? t.ownPick : t.allyPick}</small><strong>{hero?.name}</strong></span><select value={laneAssignments[id]} onChange={(event) => updateHeroLane(id, event.target.value as Exclude<Lane, "all">)} aria-label={`${t.lane} ${hero?.name}`}><option value="yellow">Y</option><option value="blue">B</option><option value="green">G</option></select></article>; })}</div><div className="lane-versus">VS</div><div className="lane-side enemy-side"><small>{t.enemiesLabel}</small>{enemyLane.map((id) => { const hero = heroMap.get(id); const isOpponent = id === laneOpponentId; return <article className={isOpponent ? "is-opponent" : ""} key={id}><HeroPortrait hero={hero} size="small" /><span><small>{isOpponent ? t.laneOpponent : t.enemyPick}</small><strong>{hero?.name}</strong></span><button type="button" onClick={() => setLaneOpponentId(id)} title={t.markLaneOpponent}>{isOpponent ? "◆" : "◇"}</button><select value={laneAssignments[id]} onChange={(event) => updateHeroLane(id, event.target.value as Exclude<Lane, "all">)} aria-label={`${t.lane} ${hero?.name}`}><option value="yellow">Y</option><option value="blue">B</option><option value="green">G</option></select></article>; })}</div></section>; })}</div>
+        <div className="lane-columns">{(["yellow", "blue", "green"] as const).map((laneKey) => {
+          const allyLane = allyTeamIds.filter((id) => laneAssignments[id] === laneKey), enemyLane = enemyIds.filter((id) => laneAssignments[id] === laneKey);
+          return <section className={`lane-column lane-column-${laneKey} ${dragOverLane === laneKey ? "is-drop-target" : ""}`} key={laneKey} onDragEnter={() => setDragOverLane(laneKey)} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDragOverLane(laneKey); }} onDrop={(event) => dropHero(event, laneKey)}>
+            <div className="lane-column-title"><span /><strong>{t[laneKey]} LANE</strong><div className="lane-rate" title={t.laneWinHint}><small>{t.laneWinRate}</small><em>{laneWinRates[laneKey] === null ? "—" : pct(laneWinRates[laneKey]!)}</em></div><b>{allyLane.length}v{enemyLane.length}</b></div>
+            {dragOverLane === laneKey && draggedHeroId !== null && laneAssignments[draggedHeroId] !== laneKey && <div className="lane-drop-hint">↓ {t.dropHere}</div>}
+            <div className="lane-side ally-side"><small>{t.alliesLabel}</small>{allyLane.map((id) => { const hero = heroMap.get(id); return <article draggable tabIndex={0} aria-label={`${hero?.name}. ${t.dragHero}`} onDragStart={(event) => startHeroDrag(event, id)} onDragEnd={finishHeroDrag} onKeyDown={(event) => moveHeroByKey(event, id)} className={`${id === heroId ? "is-you" : ""} ${draggedHeroId === id ? "is-dragging" : ""}`} key={id}><HeroPortrait hero={hero} size="small" /><span><small>{id === heroId ? t.ownPick : t.allyPick}</small><strong>{hero?.name}</strong></span><i className="drag-handle" aria-hidden="true">⠿</i></article>; })}</div>
+            <div className="lane-versus">VS</div>
+            <div className="lane-side enemy-side"><small>{t.enemiesLabel}</small>{enemyLane.map((id) => { const hero = heroMap.get(id); const isOpponent = id === laneOpponentId; return <article draggable tabIndex={0} aria-label={`${hero?.name}. ${t.dragHero}`} onDragStart={(event) => startHeroDrag(event, id)} onDragEnd={finishHeroDrag} onKeyDown={(event) => moveHeroByKey(event, id)} className={`${isOpponent ? "is-opponent" : ""} ${draggedHeroId === id ? "is-dragging" : ""}`} key={id}><HeroPortrait hero={hero} size="small" /><span><small>{isOpponent ? t.laneOpponent : t.enemyPick}</small><strong>{hero?.name}</strong></span><button type="button" onClick={() => setLaneOpponentId(id)} title={t.markLaneOpponent}>{isOpponent ? "◆" : "◇"}</button><i className="drag-handle" aria-hidden="true">⠿</i></article>; })}</div>
+          </section>;
+        })}</div>
       </section>
 
       {Boolean(counterPicks.length) && <section className="counterpick-section">
