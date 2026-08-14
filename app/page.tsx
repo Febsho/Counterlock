@@ -36,10 +36,11 @@ type CounterPick = { hero: Hero; score: number; carryRate: number; matches: numb
 type SteamProfile = { account_id: number; personaname: string; profileurl: string; avatar: string };
 type ActiveMatchPlayer = { account_id: number | null; hero_id: number | null; team: number | null };
 type ActiveMatch = { match_id: number | null; start_time: number | null; duration_s: number | null; match_mode_parsed: string | null; players: ActiveMatchPlayer[] };
+type PatchNote = { title: string; pub_date: string; link: string };
 
 const copy = {
   en: {
-    home: "Counterlock home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE",
+    home: "Counterlock home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE", lightMode: "LIGHT", darkMode: "DARK", latestPatch: "LATEST PATCH", loadingPatch: "CHECKING PATCH…", patchUnavailable: "Patch notes are temporarily unavailable.", openPatch: "OPEN FULL PATCH NOTES",
     heroTitleA: "Build for the fight", heroTitleB: "happening right now.",
     heroText: "Choose your hero, mark the enemy carry, and get item recommendations ranked with real matchup data.",
     yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero", changeHero: "CHANGE HERO", searchHero: "Search heroes…", heroRoster: "HERO ROSTER", heroesAvailable: "heroes available", selectedHero: "SELECTED", enemyPick: "ENEMY PICK", closeHeroPicker: "Close hero picker",
@@ -76,7 +77,7 @@ const copy = {
     counterpickKicker: "DRAFT ASSISTANT", counterpickTitle: "Heroes that counter", counterpickText: "Lineup score is normalized against each hero's overall baseline, revealing matchup-specific counters instead of generally strong heroes.", bestPick: "BEST PICK", teamWr: "LINEUP EDGE", carryWr: "VS. CARRY", useHero: "PLAY THIS HERO", coverage: "matchups covered", currentPick: "CURRENT PICK", showAllHeroes: "SHOW ALL HEROES", hideAllHeroes: "HIDE FULL TABLE", heroColumn: "HERO", gamesColumn: "MATCHES",
   },
   de: {
-    home: "Counterlock Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE",
+    home: "Counterlock Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE", lightMode: "HELL", darkMode: "DUNKEL", latestPatch: "LETZTER PATCH", loadingPatch: "PATCH WIRD GEPRÜFT…", patchUnavailable: "Patch-Notizen sind momentan nicht verfügbar.", openPatch: "VOLLE PATCH-NOTIZEN ÖFFNEN",
     heroTitleA: "Baue für den Kampf,", heroTitleB: "der gerade passiert.",
     heroText: "Wähle deinen Helden, markiere den gegnerischen Carry und erhalte Item-Empfehlungen aus echten Matchup-Daten.",
     yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Helden auswählen", changeHero: "HELD WECHSELN", searchHero: "Helden suchen…", heroRoster: "HELDEN-ROSTER", heroesAvailable: "Helden verfügbar", selectedHero: "AUSGEWÄHLT", enemyPick: "GEGNER-PICK", closeHeroPicker: "Heldenauswahl schließen",
@@ -331,6 +332,11 @@ export default function Home() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [darkMode, setDarkMode] = useState(true);
+  const [patchNote, setPatchNote] = useState<PatchNote | null>(null);
+  const [patchOpen, setPatchOpen] = useState(false);
+  const [patchBusy, setPatchBusy] = useState(false);
+  const [patchError, setPatchError] = useState(false);
   const [liveImportOpen, setLiveImportOpen] = useState(false);
   const [steamQuery, setSteamQuery] = useState("");
   const [savedSteamProfile, setSavedSteamProfile] = useState<SteamProfile | null>(null);
@@ -380,6 +386,8 @@ export default function Home() {
   useEffect(() => {
     const saved = window.localStorage.getItem("counterbuild-language");
     if (saved === "de" || saved === "en") setLang(saved);
+    const savedTheme = window.localStorage.getItem("counterlock-theme");
+    if (savedTheme === "light" || savedTheme === "dark") setDarkMode(savedTheme === "dark");
     try {
       const savedProfile = window.localStorage.getItem("counterlock-steam-profile");
       if (savedProfile) {
@@ -418,6 +426,11 @@ export default function Home() {
     }).catch(() => active && setError(copy[lang].assetError));
     return () => { active = false; };
   }, [lang]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = darkMode ? "dark" : "light";
+    window.localStorage.setItem("counterlock-theme", darkMode ? "dark" : "light");
+  }, [darkMode]);
 
   const analyze = useCallback(async () => {
     if (!items.length || !enemyIds.length) return;
@@ -476,19 +489,21 @@ export default function Home() {
     const pool = recommendations.filter((entry) => { const value = values(entry); return value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
     const used = new Set<number>();
     const take = (matchesPhase: (entry: Recommendation, buyTime: number) => boolean, count: number) => pool.filter((entry) => !used.has(entry.item.id) && matchesPhase(entry, values(entry).buyTime)).sort((a, b) => values(b).score - values(a).score).slice(0, count).sort((a, b) => values(a).buyTime - values(b).buyTime).map((entry) => { used.add(entry.item.id); return entry; });
-    const early = take((entry, buyTime) => buyTime < 720 || (entry.item.item_tier ?? 0) === 1, 4);
-    const mid = take((entry, buyTime) => (buyTime >= 600 && buyTime < 1260) || (entry.item.item_tier ?? 0) === 2, 4);
-    let late = take((entry, buyTime) => buyTime >= 1080 || (entry.item.item_tier ?? 0) >= 3, 4);
-    if (late.length < 4) late = [...late, ...take((entry) => (entry.item.item_tier ?? 0) >= 2, 4 - late.length)];
+    const early = take((entry, buyTime) => buyTime < 720 || (entry.item.item_tier ?? 0) === 1, 6);
+    const mid = take((entry, buyTime) => (buyTime >= 600 && buyTime < 1260) || (entry.item.item_tier ?? 0) === 2, 5);
+    let late = take((entry, buyTime) => buyTime >= 1080 || (entry.item.item_tier ?? 0) >= 3, 5);
+    if (late.length < 5) late = [...late, ...take((entry) => (entry.item.item_tier ?? 0) >= 2, 5 - late.length)];
     const rankedPool = [...pool].sort((a, b) => values(b).score - values(a).score);
-    const weapon = rankedPool.filter((entry) => entry.item.item_slot_type === "weapon").slice(0, 4);
-    const vitality = rankedPool.filter((entry) => entry.item.item_slot_type === "vitality").slice(0, 4);
-    const spirit = rankedPool.filter((entry) => entry.item.item_slot_type === "spirit").slice(0, 4);
-    const coreIds = new Set([...weapon, ...vitality, ...spirit].map((entry) => entry.item.id));
-    const flex = rankedPool.filter((entry) => !coreIds.has(entry.item.id)).slice(0, 4);
+    const missing = Math.max(0, 16 - early.length - mid.length - late.length);
+    if (missing) late = [...late, ...take(() => true, missing)];
+    const purchaseOrder = [...early, ...mid, ...late];
+    const weapon = purchaseOrder.filter((entry) => entry.item.item_slot_type === "weapon");
+    const vitality = purchaseOrder.filter((entry) => entry.item.item_slot_type === "vitality");
+    const spirit = purchaseOrder.filter((entry) => entry.item.item_slot_type === "spirit");
+    const flex = purchaseOrder.filter((entry) => !["weapon", "vitality", "spirit"].includes(entry.item.item_slot_type ?? ""));
     const upgrades = [...late, ...mid].filter((entry) => (entry.item.cost ?? 0) >= 3200);
     const sellSuggestions = early.filter((entry) => (entry.item.cost ?? 0) <= 1600).map((sell) => ({ sell, replacement: upgrades.find((upgrade) => upgrade.item.item_slot_type === sell.item.item_slot_type) })).filter((entry): entry is { sell: Recommendation; replacement: Recommendation } => Boolean(entry.replacement)).slice(0, 3);
-    return { early, mid, late, weapon, vitality, spirit, flex, sellSuggestions, values };
+    return { early, mid, late, weapon, vitality, spirit, flex, purchaseOrder, sellSuggestions, values };
   }, [buyTarget, category, itemTier, maxBudget, minSample, positiveLiftOnly, recommendations]);
 
   const counterPicks = useMemo<CounterPick[]>(() => {
@@ -621,6 +636,19 @@ export default function Home() {
   }
   function forgetSteamProfile() { window.localStorage.removeItem("counterlock-steam-profile"); setSavedSteamProfile(null); setSteamQuery(""); setSteamCandidates([]); setLiveImportMessage(""); setImportedMatchId(null); }
   function toggleLiveImport() { if (liveImportOpen) { setLiveImportOpen(false); return; } setLiveImportOpen(true); if (savedSteamProfile) void importLiveMatch(savedSteamProfile); }
+  async function showLatestPatch() {
+    setPatchOpen(true); setPatchError(false);
+    if (patchNote || patchBusy) return;
+    setPatchBusy(true);
+    try {
+      const response = await fetch(`${API}/patches`);
+      if (!response.ok) throw new Error("patch lookup failed");
+      const patches = await response.json() as PatchNote[];
+      if (!patches[0]) throw new Error("no patches");
+      setPatchNote(patches[0]);
+    } catch { setPatchError(true); }
+    finally { setPatchBusy(false); }
+  }
   function selectLane(value: Lane) { setLane(value); setLaneOnly(value !== "all"); }
   function autoAssignLanes() {
     const next: Record<number, Exclude<Lane, "all">> = {};
@@ -730,12 +758,15 @@ export default function Home() {
         <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></a>
         <div className="header-actions">
           <div className="live-pill"><span /> LIVE MATCH DATA</div>
+          <button className="header-button patch-button" type="button" onClick={() => void showLatestPatch()}>{t.latestPatch}</button>
+          <button className="header-button theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-pressed={darkMode}>{darkMode ? `☾ ${t.darkMode}` : `☀ ${t.lightMode}`}</button>
           <div className="language-toggle" aria-label="Language / Sprache">
             <button className={lang === "en" ? "active" : ""} onClick={() => setLang("en")}>EN</button>
             <button className={lang === "de" ? "active" : ""} onClick={() => setLang("de")}>DE</button>
           </div>
         </div>
       </header>
+      {patchOpen && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
 
       <section className="hero-section" id="top">
         <div className="eyebrow">{t.heroKicker}</div>
