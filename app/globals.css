@@ -348,6 +348,16 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .context-alerts button strong, .context-alerts button span { display: block; }
 .context-alerts button strong { margin: 4px 0; font: 800 10px/1.25 monospace; }
 .context-alerts button span { color: #bcb6ac; font-size: 9px; line-height: 1.3; }
+.enemy-build-signals { margin: -1px 0 14px; padding: 12px 14px; border: 1px solid #4d4b47; background: #211f1c; }
+.enemy-build-signals > small { color: #bcb6ac; }
+.enemy-build-signals > div { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 2px; }
+.enemy-build-signals article { display: flex; align-items: center; gap: 6px; min-width: max-content; padding-right: 10px; border-right: 1px solid #4d4b47; }
+.enemy-build-signals article:last-child { border-right: 0; }
+.enemy-build-signals .portrait { width: 32px; height: 32px; }
+.enemy-build-signals article > div { display: flex; gap: 4px; }
+.enemy-build-signals span { display: grid; grid-template-columns: 26px auto; align-items: center; max-width: 105px; min-height: 28px; overflow: hidden; border: 1px solid #53504a; background: #292824; }
+.enemy-build-signals img { width: 24px; height: 24px; margin: 1px; object-fit: contain; }
+.enemy-build-signals span > b { overflow: hidden; padding: 0 5px 0 1px; color: #e4dfd5; font: 700 7px/1.1 monospace; text-overflow: ellipsis; white-space: nowrap; }
 .match-context { display: grid; grid-template-columns: 1.1fr 1fr; gap: 1px; margin-bottom: 1px; background: #4d4b47; border: 1px solid #4d4b47; }
 .minute-control { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px; padding: 16px 18px; background: #242320; }
 .minute-control > span { min-width: 76px; }

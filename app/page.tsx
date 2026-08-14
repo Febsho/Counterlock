@@ -27,6 +27,7 @@ type Item = {
   component_items?: string[];
 };
 type ItemStat = { item_id: number; wins: number; losses: number; matches: number; players: number; avg_buy_time_s: number };
+type EnemyBuildSignal = { heroId: number; stats: ItemStat[] };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
 type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[] };
@@ -42,7 +43,7 @@ type PatchNote = { title: string; pub_date: string; link: string };
 const copy = {
   en: {
     home: "Counterlock home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE", lightMode: "LIGHT", darkMode: "DARK", latestPatch: "LATEST PATCH", loadingPatch: "CHECKING PATCH…", patchUnavailable: "Patch notes are temporarily unavailable.", openPatch: "OPEN FULL PATCH NOTES",
-    nextBuy: "NEXT BUY", nextBuyText: "Best fit for your current match state", matchState: "MATCH STATE", ahead: "AHEAD", even: "EVEN", behind: "BEHIND", buildPath: "BUILD PATH", balanced: "BALANCED", safe: "SAFE", greedy: "GREEDY", threats: "ENEMY THREATS", healing: "HEALING", weaponDamage: "WEAPON", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER ALERTS", alertHealing: "Enemy healing marked — prioritize anti-heal items.", alertWeapon: "Weapon damage marked — favor bullet defense next.", alertSpirit: "Spirit damage marked — favor spirit defense next.", alertCrowdControl: "Crowd control marked — consider debuff resistance.", patchFreshness: "PATCH DATA", patchFresh: "Latest patch data is being used; new-patch samples may still be stabilizing.",
+    nextBuy: "NEXT BUY", nextBuyText: "Best fit for your current match state", matchState: "MATCH STATE", ahead: "AHEAD", even: "EVEN", behind: "BEHIND", buildPath: "BUILD PATH", balanced: "BALANCED", safe: "SAFE", greedy: "GREEDY", threats: "ENEMY THREATS", healing: "HEALING", weaponDamage: "WEAPON", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER ALERTS", enemyBuildSignals: "ENEMY BUILD SIGNALS", lifestealDetected: "Common lifesteal build detected — anti-heal is boosted.", alertHealing: "Enemy healing marked — prioritize anti-heal items.", alertWeapon: "Weapon damage marked — favor bullet defense next.", alertSpirit: "Spirit damage marked — favor spirit defense next.", alertCrowdControl: "Crowd control marked — consider debuff resistance.", patchFreshness: "PATCH DATA", patchFresh: "Latest patch data is being used; new-patch samples may still be stabilizing.",
     heroTitleA: "Build for the fight", heroTitleB: "happening right now.",
     heroText: "Choose your hero, mark the enemy carry, and get item recommendations ranked with real matchup data.",
     yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero", changeHero: "CHANGE HERO", searchHero: "Search heroes…", heroRoster: "HERO ROSTER", heroesAvailable: "heroes available", selectedHero: "SELECTED", enemyPick: "ENEMY PICK", closeHeroPicker: "Close hero picker",
@@ -80,7 +81,7 @@ const copy = {
   },
   de: {
     home: "Counterlock Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE", lightMode: "HELL", darkMode: "DUNKEL", latestPatch: "LETZTER PATCH", loadingPatch: "PATCH WIRD GEPRÜFT…", patchUnavailable: "Patch-Notizen sind momentan nicht verfügbar.", openPatch: "VOLLE PATCH-NOTIZEN ÖFFNEN",
-    nextBuy: "NÄCHSTER KAUF", nextBuyText: "Beste Wahl für den aktuellen Match-Zustand", matchState: "MATCH-STATUS", ahead: "VORAUS", even: "GLEICH", behind: "HINTEN", buildPath: "BUILD-PFAD", balanced: "AUSGEWOGEN", safe: "SICHER", greedy: "GIERIG", threats: "GEGNERISCHE GEFAHREN", healing: "HEILUNG", weaponDamage: "WAFFE", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER-ALARME", alertHealing: "Gegnerische Heilung markiert — Anti-Heal-Items priorisieren.", alertWeapon: "Waffenschaden markiert — als Nächstes Bullet-Defense bevorzugen.", alertSpirit: "Spirit-Schaden markiert — als Nächstes Spirit-Defense bevorzugen.", alertCrowdControl: "Crowd Control markiert — Debuff-Resistenz erwägen.", patchFreshness: "PATCH-DATEN", patchFresh: "Daten des neuesten Patches werden genutzt; Stichproben können sich nach einem Patch noch stabilisieren.",
+    nextBuy: "NÄCHSTER KAUF", nextBuyText: "Beste Wahl für den aktuellen Match-Zustand", matchState: "MATCH-STATUS", ahead: "VORAUS", even: "GLEICH", behind: "HINTEN", buildPath: "BUILD-PFAD", balanced: "AUSGEWOGEN", safe: "SICHER", greedy: "GIERIG", threats: "GEGNERISCHE GEFAHREN", healing: "HEILUNG", weaponDamage: "WAFFE", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER-ALARME", enemyBuildSignals: "GEGNERISCHE BUILD-SIGNALE", lifestealDetected: "Häufiger Lifesteal-Build erkannt — Anti-Heal wird verstärkt.", alertHealing: "Gegnerische Heilung markiert — Anti-Heal-Items priorisieren.", alertWeapon: "Waffenschaden markiert — als Nächstes Bullet-Defense bevorzugen.", alertSpirit: "Spirit-Schaden markiert — als Nächstes Spirit-Defense bevorzugen.", alertCrowdControl: "Crowd Control markiert — Debuff-Resistenz erwägen.", patchFreshness: "PATCH-DATEN", patchFresh: "Daten des neuesten Patches werden genutzt; Stichproben können sich nach einem Patch noch stabilisieren.",
     heroTitleA: "Baue für den Kampf,", heroTitleB: "der gerade passiert.",
     heroText: "Wähle deinen Helden, markiere den gegnerischen Carry und erhalte Item-Empfehlungen aus echten Matchup-Daten.",
     yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Helden auswählen", changeHero: "HELD WECHSELN", searchHero: "Helden suchen…", heroRoster: "HELDEN-ROSTER", heroesAvailable: "Helden verfügbar", selectedHero: "AUSGEWÄHLT", enemyPick: "GEGNER-PICK", closeHeroPicker: "Heldenauswahl schließen",
@@ -330,6 +331,7 @@ export default function Home() {
   const [matchState, setMatchState] = useState<"ahead" | "even" | "behind">("even");
   const [threats, setThreats] = useState({ healing: false, weapon: false, spirit: false, crowdControl: false });
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [enemyBuildSignals, setEnemyBuildSignals] = useState<EnemyBuildSignal[]>([]);
   const [matchup, setMatchup] = useState<CounterStat | null>(null);
   const [allCounterStats, setAllCounterStats] = useState<CounterStat[]>([]);
   const [laneCounterStats, setLaneCounterStats] = useState<CounterStat[]>([]);
@@ -449,19 +451,21 @@ export default function Home() {
       const matchupParams = new URLSearchParams(commonParams); matchupParams.set("same_lane_filter", String(laneOnly));
       const matchupCommon = matchupParams.toString();
       const laneCounterParams = new URLSearchParams(commonParams); laneCounterParams.set("same_lane_filter", "true");
-      const [baseStats, teamStats, carryStats, counterStats, laneStats, individualEnemyStats] = await Promise.all([
+      const [baseStats, teamStats, carryStats, counterStats, laneStats, individualEnemyStats, enemyBuildStats] = await Promise.all([
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&${common}`).then((r) => r.json()),
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyIds.join(",")}&${matchupCommon}`).then((r) => r.json()),
         fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${carryId}&${matchupCommon}`).then((r) => r.json()),
         fetch(`${API}/analytics/hero-counter-stats?${matchupCommon}`).then((r) => r.json()),
         fetch(`${API}/analytics/hero-counter-stats?${laneCounterParams}`).then((r) => r.json()),
         Promise.all(enemyIds.map((enemyId) => fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyId}&${matchupCommon}`).then((r) => r.json() as Promise<ItemStat[]>))),
-      ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[], CounterStat[], ItemStat[][]];
+        Promise.all(enemyIds.map((enemyId) => fetch(`${API}/analytics/item-stats?hero_ids=${enemyId}&${common}`).then((r) => r.json() as Promise<ItemStat[]>))),
+      ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[], CounterStat[], ItemStat[][], ItemStat[][]];
       if (runId !== analysisRunRef.current) return;
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
       const carryMap = new Map(carryStats.map((stat) => [stat.item_id, stat]));
       const individualEnemyMaps = individualEnemyStats.map((stats) => new Map(stats.map((stat) => [stat.item_id, stat])));
+      setEnemyBuildSignals(enemyIds.map((heroId, index) => ({ heroId, stats: enemyBuildStats[index].sort((a, b) => b.matches - a.matches).slice(0, 4) })));
       setRecommendations(items.map((item) => {
         const base = baseMap.get(item.id), team = teamMap.get(item.id), carry = carryMap.get(item.id);
         if (!team || !carry) return null;
@@ -483,6 +487,9 @@ export default function Home() {
 
   useEffect(() => { if (items.length && enemyIds.length) void analyze(); }, [analyze, enemyIds.length, items.length]);
 
+  const enemyBuildInsights = useMemo(() => enemyBuildSignals.map((signal) => ({ ...signal, items: signal.stats.map((stat) => ({ stat, item: items.find((item) => item.id === stat.item_id) })).filter((entry): entry is { stat: ItemStat; item: Item } => Boolean(entry.item)) })), [enemyBuildSignals, items]);
+  const lifestealDetected = useMemo(() => enemyBuildInsights.some((signal) => signal.items.some(({ item }) => /lifesteal|leech|healingbooster|restorative|siphon/.test(normalizeText(`${item.name}${item.class_name ?? ""}`)))), [enemyBuildInsights]);
+
   const contextBoost = useCallback((entry: Recommendation) => {
     const name = normalizeText(`${entry.item.name} ${entry.item.class_name ?? ""}`);
     const has = (...terms: string[]) => terms.some((term) => name.includes(term));
@@ -491,12 +498,12 @@ export default function Home() {
     if (buildStyle === "greedy") boost += (entry.item.cost ?? 0) >= 3200 ? .014 : 0;
     if (matchState === "behind") boost += entry.item.item_slot_type === "vitality" ? .02 : 0;
     if (matchState === "ahead") boost += entry.item.item_slot_type === "weapon" || entry.item.item_slot_type === "spirit" ? .01 : 0;
-    if (threats.healing && has("healbane", "toxic", "decay", "silencer")) boost += .05;
+    if ((threats.healing || lifestealDetected) && has("healbane", "toxic", "decay", "silencer")) boost += .05;
     if (threats.weapon && has("bulletarmor", "metalskin", "reactivebarrier", "fortitude")) boost += .04;
     if (threats.spirit && has("spiritarmor", "divinebarrier", "improvedspirit", "debuffreducer")) boost += .04;
     if (threats.crowdControl && has("debuffreducer", "unstoppable", "etherealshift", "divinebarrier")) boost += .04;
     return boost;
-  }, [buildStyle, matchState, threats]);
+  }, [buildStyle, lifestealDetected, matchState, threats]);
 
   function updateContext(action: () => void) { action(); setSortMode("recommended"); }
 
@@ -520,10 +527,11 @@ export default function Home() {
     const missing = Math.max(0, 16 - early.length - mid.length - late.length);
     if (missing) late = [...late, ...take(() => true, missing)];
     const purchaseOrder = [...early, ...mid, ...late];
-    const weapon = purchaseOrder.filter((entry) => entry.item.item_slot_type === "weapon");
-    const vitality = purchaseOrder.filter((entry) => entry.item.item_slot_type === "vitality");
-    const spirit = purchaseOrder.filter((entry) => entry.item.item_slot_type === "spirit");
-    const flex = purchaseOrder.filter((entry) => !["weapon", "vitality", "spirit"].includes(entry.item.item_slot_type ?? ""));
+    const weapon = purchaseOrder.filter((entry) => entry.item.item_slot_type === "weapon").slice(0, 4);
+    const vitality = purchaseOrder.filter((entry) => entry.item.item_slot_type === "vitality").slice(0, 4);
+    const spirit = purchaseOrder.filter((entry) => entry.item.item_slot_type === "spirit").slice(0, 4);
+    const lockedInventory = new Set([...weapon, ...vitality, ...spirit].map((entry) => entry.item.id));
+    const flex = purchaseOrder.filter((entry) => !lockedInventory.has(entry.item.id));
     const upgrades = [...late, ...mid].filter((entry) => (entry.item.cost ?? 0) >= 3200);
     const sellSuggestions = early.filter((entry) => (entry.item.cost ?? 0) <= 1600).map((sell) => ({ sell, replacement: upgrades.find((upgrade) => upgrade.item.item_slot_type === sell.item.item_slot_type) })).filter((entry): entry is { sell: Recommendation; replacement: Recommendation } => Boolean(entry.replacement)).slice(0, 3);
     return { early, mid, late, weapon, vitality, spirit, flex, purchaseOrder, sellSuggestions, values };
@@ -551,7 +559,7 @@ export default function Home() {
     }).filter((entry): entry is CounterPick => Boolean(entry)).sort((a, b) => b.score - a.score);
   }, [allCounterStats, carryId, enemyIds, heroes]);
   const nextBuy = visibleRecommendations[0];
-  const activeAlerts = [threats.healing ? t.alertHealing : null, threats.weapon ? t.alertWeapon : null, threats.spirit ? t.alertSpirit : null, threats.crowdControl ? t.alertCrowdControl : null].filter((alert): alert is NonNullable<typeof alert> => alert !== null);
+  const activeAlerts = [lifestealDetected ? t.lifestealDetected : null, threats.healing ? t.alertHealing : null, threats.weapon ? t.alertWeapon : null, threats.spirit ? t.alertSpirit : null, threats.crowdControl ? t.alertCrowdControl : null].filter((alert): alert is NonNullable<typeof alert> => alert !== null);
 
   const filteredHeroes = useMemo(() => {
     const query = heroSearch.trim().toLocaleLowerCase(lang);
@@ -874,6 +882,7 @@ export default function Home() {
           <div className="threat-controls"><small>{t.threats}</small><div>{(["healing", "weapon", "spirit", "crowdControl"] as const).map((threat) => <button className={threats[threat] ? "active" : ""} type="button" key={threat} onClick={() => updateContext(() => setThreats((current) => ({ ...current, [threat]: !current[threat] })))}>{t[threat === "weapon" ? "weaponDamage" : threat === "spirit" ? "spiritDamage" : threat]}</button>)}</div></div>
         </section>
         {(activeAlerts.length > 0 || patchNote) && <section className="context-alerts"><div><small>{t.counterAlerts}</small>{activeAlerts.map((alert) => <p key={alert}>⚠ {alert}</p>)}</div><button type="button" onClick={() => void showLatestPatch()}><small>{t.patchFreshness}</small><strong>{patchNote?.title ?? t.latestPatch}</strong><span>{t.patchFresh}</span></button></section>}
+        {enemyBuildInsights.length > 0 && <section className="enemy-build-signals"><small>{t.enemyBuildSignals}</small><div>{enemyBuildInsights.map((signal) => <article key={signal.heroId}><HeroPortrait hero={heroMap.get(signal.heroId)} size="small" /><div>{signal.items.slice(0, 3).map(({ item, stat }) => <span key={item.id} title={`${item.name} · ${formatMatches(stat.matches, lang)} ${t.games}`}>{item.shop_image_webp ? <img src={item.shop_image_webp} alt="" /> : "◆"}<b>{item.name}</b></span>)}</div></article>)}</div></section>}
 
         <div className="match-context">
           <label className="minute-control"><span><small>{t.currentMinute}</small><strong>{gameMinute}:00</strong></span><input type="range" min="1" max="40" value={gameMinute} onChange={(event) => setGameMinute(Number(event.target.value))} /><div className="phase-tabs">{(["early", "mid", "late"] as Phase[]).map((value) => <button type="button" key={value} className={phase === value ? "active" : ""} onClick={() => setGameMinute(value === "early" ? 7 : value === "mid" ? 15 : 26)}>{t[value]}</button>)}</div></label>
