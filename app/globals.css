@@ -497,6 +497,26 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .empty-card { padding: 38px 24px; border: 1px solid #4d4b47; color: #aaa59c; text-align: center; font-size: 13px; }
 
 footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 30px clamp(20px, 7vw, 108px); border-top: 2px solid var(--ink); }
+/* Dark-mode contrast corrections for dense lane and draft surfaces. */
+html[data-theme="dark"] .lane-board-head, html[data-theme="dark"] .lane-column { border-color: #55554f; }
+html[data-theme="dark"] .lane-column-title b, html[data-theme="dark"] .lane-rate small, html[data-theme="dark"] .lane-side > small, html[data-theme="dark"] .lane-side article > span small { color: #bdb8ae; }
+html[data-theme="dark"] .lane-rate em, html[data-theme="dark"] .lane-column-title strong, html[data-theme="dark"] .lane-side article > span strong { color: #f2eee5; }
+html[data-theme="dark"] .lane-side article.is-you { background: #1f3827; border-color: #6fcf7d; }
+html[data-theme="dark"] .lane-side article.is-opponent { background: #402522; border-color: #ff7067; }
+html[data-theme="dark"] .lane-side article:hover, html[data-theme="dark"] .lane-side article:focus-visible { border-color: #f2eee5; box-shadow: 3px 3px 0 #070806; }
+html[data-theme="dark"] .drag-handle { border-color: #66635d; background: #ebe6da; color: #33332f; }
+html[data-theme="dark"] .lane-versus { color: #c0bbb1; }
+html[data-theme="dark"] .lane-versus::before, html[data-theme="dark"] .lane-versus::after { background: #5b5953; }
+html[data-theme="dark"] .counterpick-grid, html[data-theme="dark"] .counterpick-grid article, html[data-theme="dark"] .counter-table { border-color: #55554f; }
+html[data-theme="dark"] .counterpick-grid article, html[data-theme="dark"] .counterpick-grid article:first-child { background: #292a27; color: #f2eee5; }
+html[data-theme="dark"] .counterpick-grid article.current { background: #303229; box-shadow: inset 0 0 0 4px #ff5e54; }
+html[data-theme="dark"] .pick-rank, html[data-theme="dark"] .pick-hero small { color: #bdb8ae; }
+html[data-theme="dark"] .pick-metrics { border-color: #6a6760; }
+html[data-theme="dark"] .pick-metrics > div { border-color: #6a6760; }
+html[data-theme="dark"] .pick-metrics strong, html[data-theme="dark"] .counterpick-grid article:first-child .pick-metrics strong:first-of-type { color: #f2eee5; }
+html[data-theme="dark"] .pick-metrics > div:first-child strong { color: var(--acid); }
+html[data-theme="dark"] .counterpick-grid article > button { border-color: #5b5953; background: #11120f; color: var(--acid); }
+html[data-theme="dark"] .counterpick-grid article > button:disabled { border-color: #5b5953; background: #20211e; color: #bdb8ae; }
 footer p { margin: 0; color: #6e6a62; font-size: 10px; }
 footer a { color: inherit; }
 
