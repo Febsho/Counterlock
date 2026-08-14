@@ -65,7 +65,7 @@ h1 em { color: var(--red); font-style: italic; font-weight: 950; }
 .match-import-bar p small { margin: 0; color: #aaa59c; font-size: 7px; line-height: 1.35; }
 .match-import-actions { display: flex; gap: 8px; }
 .match-import-actions button { min-height: 40px; padding: 10px 16px; border: 2px solid var(--acid); background: var(--acid); color: var(--ink); font: 900 8px/1 monospace; letter-spacing: .07em; cursor: pointer; }
-.match-import-actions button:last-child { border-color: #77736b; background: transparent; color: var(--paper); }
+.match-import-actions .live-match-secondary { border-color: #77736b; background: transparent; color: var(--paper); }
 .match-import-actions button b { margin-left: 7px; padding: 3px 5px; background: var(--ink); color: var(--acid); font-size: 7px; }
 .live-import-panel { position: relative; display: grid; grid-template-columns: minmax(240px, .75fr) minmax(360px, 1fr); gap: 18px 36px; padding: 28px clamp(20px, 5vw, 76px); border-bottom: 2px solid var(--ink); background: #e7e1d4; }
 .live-import-copy h2 { margin-top: 8px; font-size: clamp(24px, 3vw, 40px); }
@@ -392,7 +392,7 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .sell-pair-item.replacement small { color: var(--acid); }
 .sell-pair-item strong { display: block; overflow: hidden; font-size: 7px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .item-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid #4d4b47; }
-.item-card { position: relative; display: grid; grid-template-columns: 36px 66px minmax(160px, 1fr) 82px 76px 78px; align-items: center; gap: 14px; min-height: 154px; padding: 18px 20px 18px 9px; border-bottom: 1px solid #4d4b47; }
+.item-card { position: relative; display: grid; grid-template-columns: 36px 66px minmax(160px, 1fr) 82px 76px 78px; align-items: center; gap: 14px; min-height: 168px; padding: 18px 20px 18px 9px; border-bottom: 1px solid #4d4b47; }
 .item-card:nth-child(odd) { border-right: 1px solid #4d4b47; }
 .item-card::before { content: ""; position: absolute; left: 0; top: 20px; bottom: 20px; width: 3px; background: #888; }
 .item-card.slot-weapon::before { background: var(--weapon); }
@@ -403,8 +403,17 @@ h2 span { display: block; color: var(--acid); font-style: italic; }
 .item-icon img { width: 86%; height: 86%; object-fit: contain; }
 .item-meta { display: flex; gap: 8px; margin-bottom: 7px; }
 .item-meta span { color: #aaa59c; font: 800 9px/1 monospace; text-transform: uppercase; letter-spacing: .08em; }
+.confidence { margin-left: auto; padding: 3px 5px; border: 1px solid currentColor; font: 900 6px/1 monospace; letter-spacing: .08em; }
+.confidence.high { color: var(--acid); }
+.confidence.medium { color: #f5be57; }
+.confidence.low { color: #ff8d85; }
 .item-main h3 { margin: 0; font-size: 17px; line-height: 1.1; text-transform: uppercase; letter-spacing: -.02em; }
 .item-reason { margin-top: 7px; color: #bbb5ac; font-size: 11px; line-height: 1.35; }
+.item-why { margin-top: 7px; color: #928d84; }
+.item-why summary { color: #aaa59c; font: 800 7px/1 monospace; letter-spacing: .08em; cursor: pointer; list-style: none; }
+.item-why summary::before { content: "+ "; color: var(--acid); }
+.item-why[open] summary::before { content: "− "; }
+.item-why p { margin: 5px 0 0; font-size: 9px; line-height: 1.35; }
 .team-item-targets { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
 .team-item-targets > small { flex: 0 0 auto; margin: 0; color: #aaa59c; font-size: 8px; }
 .team-item-targets > div { display: flex; gap: 5px; }
