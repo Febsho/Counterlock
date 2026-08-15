@@ -39,7 +39,7 @@ type SteamProfile = { account_id: number; personaname: string; profileurl: strin
 type ActiveMatchPlayer = { account_id: number | null; hero_id: number | null; team: number | null };
 type ActiveMatch = { match_id: number | null; start_time: number | null; duration_s: number | null; match_mode_parsed: string | null; players: ActiveMatchPlayer[] };
 type PatchNote = { title: string; pub_date: string; link: string };
-type CompanionStatus = { in_game: boolean; account_id: number | null; match_id: number | null; joined_at: number | null };
+type CompanionStatus = { in_game: boolean; account_id: number | null; match_id: number | null; joined_at: number | null; hud_capture_available?: boolean };
 
 const copy = {
   en: {
@@ -370,6 +370,7 @@ export default function Home() {
   const enemyRosterRef = useRef<HTMLDivElement>(null);
   const analysisRunRef = useRef(0);
   const companionMatchRef = useRef<number | null>(null);
+  const companionCaptureRef = useRef<number | null>(null);
   const t = copy[lang];
   const phase: Phase = gameMinute < 11 ? "early" : gameMinute < 21 ? "mid" : "late";
 
@@ -457,6 +458,17 @@ export default function Home() {
         const status = await response.json() as CompanionStatus;
         if (!mounted) return;
         setCompanionStatus(status.in_game ? "waiting" : "connected");
+        if (status.in_game && status.match_id && status.hud_capture_available && companionCaptureRef.current !== status.match_id) {
+          companionCaptureRef.current = status.match_id;
+          try {
+            const image = await fetch("http://127.0.0.1:9876/v1/hud-capture", { cache: "no-store" });
+            if (!image.ok) throw new Error("capture unavailable");
+            const blob = await image.blob();
+            if (!mounted || !blob.size) return;
+            setImportTarget("auto"); setImporterOpen(true);
+            void readScreenshot(new File([blob], "counterlock-live-hud.png", { type: "image/png" }), "auto");
+          } catch { companionCaptureRef.current = null; }
+        }
         if (!status.in_game || !status.match_id || !status.account_id || importedMatchId === status.match_id) return;
         companionMatchRef.current = status.match_id;
         setLiveImportOpen(true);
