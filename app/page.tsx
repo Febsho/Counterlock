@@ -39,10 +39,11 @@ type SteamProfile = { account_id: number; personaname: string; profileurl: strin
 type ActiveMatchPlayer = { account_id: number | null; hero_id: number | null; team: number | null };
 type ActiveMatch = { match_id: number | null; start_time: number | null; duration_s: number | null; match_mode_parsed: string | null; players: ActiveMatchPlayer[] };
 type PatchNote = { title: string; pub_date: string; link: string };
+type CompanionStatus = { in_game: boolean; account_id: number | null; match_id: number | null; joined_at: number | null };
 
 const copy = {
   en: {
-    home: "Counterlock home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE", lightMode: "LIGHT", darkMode: "DARK", latestPatch: "LATEST PATCH", loadingPatch: "CHECKING PATCH…", patchUnavailable: "Patch notes are temporarily unavailable.", openPatch: "OPEN FULL PATCH NOTES",
+    home: "Counterlock home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE", lightMode: "LIGHT", darkMode: "DARK", latestPatch: "LATEST PATCH", loadingPatch: "CHECKING PATCH…", patchUnavailable: "Patch notes are temporarily unavailable.", openPatch: "OPEN FULL PATCH NOTES", companionConnected: "LOCAL COMPANION CONNECTED", companionSearching: "WAITING FOR LOCAL MATCH", companionUnavailable: "LOCAL COMPANION OFFLINE",
     nextBuy: "NEXT BUY", nextBuyText: "Best fit for your current match state", matchState: "MATCH STATE", ahead: "AHEAD", even: "EVEN", behind: "BEHIND", buildPath: "BUILD PATH", balanced: "BALANCED", safe: "SAFE", greedy: "GREEDY", threats: "ENEMY THREATS", healing: "HEALING", weaponDamage: "WEAPON", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER ALERTS", enemyBuildSignals: "ENEMY BUILD SIGNALS", lifestealDetected: "Common lifesteal build detected — anti-heal is boosted.", alertHealing: "Enemy healing marked — prioritize anti-heal items.", alertWeapon: "Weapon damage marked — favor bullet defense next.", alertSpirit: "Spirit damage marked — favor spirit defense next.", alertCrowdControl: "Crowd control marked — consider debuff resistance.", patchFreshness: "PATCH DATA", patchFresh: "Latest patch data is being used; new-patch samples may still be stabilizing.", souls: "SOULS AVAILABLE", needSouls: "MORE SOULS NEEDED", affordable: "AFFORDABLE NOW", totalBuildCost: "FULL BUILD COST", remainingCost: "REMAINING", planChecks: "BUILD CHECK", planReady: "16 unique items · no conflicts found", overlay: "MATCH OVERLAY", closeOverlay: "Close match overlay", savePreset: "SAVE SETUP", loadPreset: "LOAD SETUP", presetSaved: "SETUP SAVED", presetMissing: "NO SAVED SETUP", situationalSlots: "SITUATIONAL", enemyDetails: "ENEMY BUILD DETAIL", closeDetails: "Close enemy build detail", commonBuild: "COMMON ITEMS", recommendationReason: "WHY", currentItem: "CURRENT ITEM", markOwned: "MARK OWNED", removeOwned: "REMOVE", duplicatePlan: "Already owned — skipped from next buy", patchCompare: "PATCH STATUS", patchCompareText: "Recommendations use current patch data; early samples can shift as more matches arrive.",
     heroTitleA: "Build for the fight", heroTitleB: "happening right now.",
     heroText: "Choose your hero, mark the enemy carry, and get item recommendations ranked with real matchup data.",
@@ -80,7 +81,7 @@ const copy = {
     counterpickKicker: "DRAFT ASSISTANT", counterpickTitle: "Heroes that counter", counterpickText: "Lineup score is normalized against each hero's overall baseline, revealing matchup-specific counters instead of generally strong heroes.", bestPick: "BEST PICK", teamWr: "LINEUP EDGE", carryWr: "VS. CARRY", useHero: "PLAY THIS HERO", coverage: "matchups covered", currentPick: "CURRENT PICK", showAllHeroes: "SHOW ALL HEROES", hideAllHeroes: "HIDE FULL TABLE", heroColumn: "HERO", gamesColumn: "MATCHES",
   },
   de: {
-    home: "Counterlock Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE", lightMode: "HELL", darkMode: "DUNKEL", latestPatch: "LETZTER PATCH", loadingPatch: "PATCH WIRD GEPRÜFT…", patchUnavailable: "Patch-Notizen sind momentan nicht verfügbar.", openPatch: "VOLLE PATCH-NOTIZEN ÖFFNEN",
+    home: "Counterlock Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE", lightMode: "HELL", darkMode: "DUNKEL", latestPatch: "LETZTER PATCH", loadingPatch: "PATCH WIRD GEPRÜFT…", patchUnavailable: "Patch-Notizen sind momentan nicht verfügbar.", openPatch: "VOLLE PATCH-NOTIZEN ÖFFNEN", companionConnected: "LOKALER COMPANION VERBUNDEN", companionSearching: "WARTE AUF LOKALES MATCH", companionUnavailable: "LOKALER COMPANION OFFLINE",
     nextBuy: "NÄCHSTER KAUF", nextBuyText: "Beste Wahl für den aktuellen Match-Zustand", matchState: "MATCH-STATUS", ahead: "VORAUS", even: "GLEICH", behind: "HINTEN", buildPath: "BUILD-PFAD", balanced: "AUSGEWOGEN", safe: "SICHER", greedy: "GIERIG", threats: "GEGNERISCHE GEFAHREN", healing: "HEILUNG", weaponDamage: "WAFFE", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER-ALARME", enemyBuildSignals: "GEGNERISCHE BUILD-SIGNALE", lifestealDetected: "Häufiger Lifesteal-Build erkannt — Anti-Heal wird verstärkt.", alertHealing: "Gegnerische Heilung markiert — Anti-Heal-Items priorisieren.", alertWeapon: "Waffenschaden markiert — als Nächstes Bullet-Defense bevorzugen.", alertSpirit: "Spirit-Schaden markiert — als Nächstes Spirit-Defense bevorzugen.", alertCrowdControl: "Crowd Control markiert — Debuff-Resistenz erwägen.", patchFreshness: "PATCH-DATEN", patchFresh: "Daten des neuesten Patches werden genutzt; new-patch samples may still be stabilizing.", souls: "VERFÜGBARE SEELEN", needSouls: "MEHR SEELEN NÖTIG", affordable: "JETZT KAUFBAR", totalBuildCost: "BUILD-GESAMTKOSTEN", remainingCost: "VERBLEIBEND", planChecks: "BUILD-CHECK", planReady: "16 einzigartige Items · keine Konflikte", overlay: "MATCH-OVERLAY", closeOverlay: "Match-Overlay schließen", savePreset: "SETUP SPEICHERN", loadPreset: "SETUP LADEN", presetSaved: "SETUP GESPEICHERT", presetMissing: "KEIN GESPEICHERTES SETUP", situationalSlots: "SITUATIV", enemyDetails: "GEGNER-BUILD-DETAIL", closeDetails: "Gegner-Build-Detail schließen", commonBuild: "HÄUFIGE ITEMS", recommendationReason: "WARUM", currentItem: "AKTUELLES ITEM", markOwned: "ALS BESITZT MARKIEREN", removeOwned: "ENTFERNEN", duplicatePlan: "Bereits vorhanden — beim nächsten Kauf übersprungen", patchCompare: "PATCH-STATUS", patchCompareText: "Empfehlungen nutzen Daten des aktuellen Patches; frühe Stichproben können sich noch verändern.",
     heroTitleA: "Baue für den Kampf,", heroTitleB: "der gerade passiert.",
     heroText: "Wähle deinen Helden, markiere den gegnerischen Carry und erhalte Item-Empfehlungen aus echten Matchup-Daten.",
@@ -357,6 +358,7 @@ export default function Home() {
   const [liveImportBusy, setLiveImportBusy] = useState(false);
   const [liveImportMessage, setLiveImportMessage] = useState("");
   const [importedMatchId, setImportedMatchId] = useState<number | null>(null);
+  const [companionStatus, setCompanionStatus] = useState<"offline" | "waiting" | "connected">("offline");
   const [importerOpen, setImporterOpen] = useState(false);
   const [importTarget, setImportTarget] = useState<ImportTarget>("enemy");
   const [screenshotUrl, setScreenshotUrl] = useState("");
@@ -367,6 +369,7 @@ export default function Home() {
   const [selectedDetections, setSelectedDetections] = useState<number[]>([]);
   const enemyRosterRef = useRef<HTMLDivElement>(null);
   const analysisRunRef = useRef(0);
+  const companionMatchRef = useRef<number | null>(null);
   const t = copy[lang];
   const phase: Phase = gameMinute < 11 ? "early" : gameMinute < 21 ? "mid" : "late";
 
@@ -444,6 +447,26 @@ export default function Home() {
     document.documentElement.dataset.theme = darkMode ? "dark" : "light";
     window.localStorage.setItem("counterlock-theme", darkMode ? "dark" : "light");
   }, [darkMode]);
+
+  useEffect(() => {
+    let mounted = true;
+    const pollCompanion = async () => {
+      try {
+        const response = await fetch("http://127.0.0.1:9876/v1/status", { cache: "no-store" });
+        if (!response.ok) throw new Error("companion unavailable");
+        const status = await response.json() as CompanionStatus;
+        if (!mounted) return;
+        setCompanionStatus(status.in_game ? "waiting" : "connected");
+        if (!status.in_game || !status.match_id || !status.account_id || importedMatchId === status.match_id) return;
+        companionMatchRef.current = status.match_id;
+        setLiveImportOpen(true);
+        void importLiveMatch({ account_id: status.account_id, personaname: `Steam ${status.account_id}`, profileurl: "", avatar: "" });
+      } catch { if (mounted) setCompanionStatus("offline"); }
+    };
+    void pollCompanion();
+    const timer = window.setInterval(() => void pollCompanion(), 8_000);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, [importedMatchId]);
 
   const analyze = useCallback(async () => {
     if (!items.length || !enemyIds.length) return;
@@ -811,7 +834,7 @@ export default function Home() {
       <header className="site-header">
         <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></a>
         <div className="header-actions">
-          <div className="live-pill"><span /> LIVE MATCH DATA</div>
+          <div className={`live-pill companion-${companionStatus}`}><span /> {companionStatus === "connected" ? t.companionConnected : companionStatus === "waiting" ? t.companionSearching : t.companionUnavailable}</div>
           <button className="header-button patch-button" type="button" onClick={() => void showLatestPatch()}>{t.latestPatch}</button>
           <button className="header-button theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-pressed={darkMode}>{darkMode ? `☾ ${t.darkMode}` : `☀ ${t.lightMode}`}</button>
           <div className="language-toggle" aria-label="Language / Sprache">
