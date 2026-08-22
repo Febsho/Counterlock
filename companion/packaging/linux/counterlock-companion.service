@@ -1,0 +1,46 @@
+[Unit]
+Description=Counterlock companion (local Deadlock match data + UI)
+Documentation=https://github.com/Febsho/deadlock-counterlock
+# Wants a graphical session: HUD capture needs the display server, and the
+# service is useless without the user's Steam directory mounted.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/counterlock-companion
+Restart=on-failure
+RestartSec=5
+
+# Structured logs land in the journal: journalctl --user -u counterlock-companion -f
+Environment=RUST_LOG=counterlock_companion=info
+# Uncomment to emit newline-delimited JSON instead of human-readable logs.
+#Environment=COUNTERLOCK_JSON_LOGS=1
+# Uncomment if the Steam account cannot be detected automatically.
+#Environment=COUNTERLOCK_ACCOUNT_ID=76561198000000000
+
+# Hardening. The companion only needs to read its own config, the user's Steam
+# directory, and to reach the network for the telemetry provider.
+NoNewPrivileges=true
+PrivateTmp=false
+ProtectSystem=strict
+ProtectHome=read-only
+# The capture backend writes the temporary PNG here.
+ReadWritePaths=%T
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+# Loopback plus outbound HTTPS to the provider.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# The companion never needs to trace or read another process.
+SystemCallFilter=@system-service
+SystemCallFilter=~@debug @mount @obsolete @privileged @resources
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=graphical-session.target

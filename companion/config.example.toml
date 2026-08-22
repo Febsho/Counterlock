@@ -1,0 +1,47 @@
+# Counterlock companion configuration.
+#
+# Location:
+#   Linux    ~/.config/counterlock/companion.toml
+#   Windows  %APPDATA%\counterlock\companion.toml
+#
+# Every value below is the default; delete any line to keep the default.
+# Environment variables (COUNTERLOCK_*) override this file.
+
+# Loopback port for the UI and the API. The companion never binds a
+# non-loopback address, so this is not reachable from the network.
+port = 9876
+
+# Extra browser origins allowed to call the API. http://127.0.0.1:<port> and
+# http://localhost:<port> are always allowed. Add your dev server here, e.g.
+# allowed_origins = ["http://localhost:3000"]
+allowed_origins = []
+
+# Telemetry source:
+#   "deadlock-api"  public Deadlock API (matches/active)
+#   "none"          serve the UI only, report no match data
+provider = "deadlock-api"
+
+# Poll cadence while a match is live, in milliseconds. Clamped to 1000-2000.
+in_match_poll_ms = 1500
+
+# Poll cadence while idle. Minimum 2000.
+idle_poll_ms = 8000
+
+# Steam account id. Left unset, the companion reads the most recent account
+# from Steam's own loginusers.vdf. Accepts an account id or a SteamID64.
+#account_id = 76561198000000000
+
+# Allow the UI to request a screenshot via GET /v1/hud-capture.
+# Captures are written to a temp file, served over loopback, then deleted.
+enable_hud_capture = true
+
+# Master switch for sending anything off this machine. While false, no match
+# data and no screenshots leave the computer. Nothing in the companion uploads
+# today; this exists so that can never change silently.
+allow_uploads = false
+
+# Emit newline-delimited JSON logs instead of human-readable ones.
+json_logs = false
+
+# Base URL of the Deadlock API.
+deadlock_api_base = "https://api.deadlock-api.com/v1"

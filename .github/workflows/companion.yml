@@ -1,0 +1,102 @@
+name: companion
+
+# Builds the Linux and Windows companion binaries. The UI export is built first
+# on each runner, because it is embedded into the binary at compile time.
+
+on:
+  push:
+    branches: [main]
+    paths: ['companion/**', 'app/**', '.github/workflows/companion.yml']
+  pull_request:
+    paths: ['companion/**', 'app/**', '.github/workflows/companion.yml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: clippy, rustfmt }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: companion }
+      - run: npm ci
+      # rust-embed needs out/ to exist before the crate compiles.
+      - run: npm run build:companion-ui
+      - run: cargo fmt --manifest-path companion/Cargo.toml --check
+      - run: cargo clippy --manifest-path companion/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path companion/Cargo.toml
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: counterlock-companion
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: counterlock-companion.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: '${{ matrix.target }}' }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: companion, key: '${{ matrix.target }}' }
+      - run: npm ci
+      - run: npm run build:companion-ui
+      - run: cargo build --manifest-path companion/Cargo.toml --release --target ${{ matrix.target }}
+
+      # Authenticode signing. Skipped unless the secrets are configured, so
+      # forks and PRs still produce a working (unsigned) binary.
+      - name: Sign the Windows binary
+        if: matrix.os == 'windows-latest' && env.CERT != ''
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:CERT))
+          & "${env:ProgramFiles(x86)}\Windows Kits\10\bin\x64\signtool.exe" sign `
+            /f "$env:RUNNER_TEMP\cert.pfx" /p $env:CERT_PASSWORD `
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 `
+            "companion\target\${{ matrix.target }}\release\counterlock-companion.exe"
+          Remove-Item "$env:RUNNER_TEMP\cert.pfx"
+
+      - name: Build the Windows installer
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          & "$env:ProgramFiles(x86)\Inno Setup 6\ISCC.exe" `
+            companion\packaging\windows\counterlock-companion.iss
+
+      - name: Sign the Windows installer
+        if: matrix.os == 'windows-latest' && env.CERT != ''
+        env:
+          CERT: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:CERT))
+          Get-ChildItem companion\packaging\windows\Output\*.exe | ForEach-Object {
+            & "${env:ProgramFiles(x86)}\Windows Kits\10\bin\x64\signtool.exe" sign `
+              /f "$env:RUNNER_TEMP\cert.pfx" /p $env:CERT_PASSWORD `
+              /tr http://timestamp.digicert.com /td sha256 /fd sha256 $_.FullName
+          }
+          Remove-Item "$env:RUNNER_TEMP\cert.pfx"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-${{ matrix.target }}
+          path: |
+            companion/target/${{ matrix.target }}/release/${{ matrix.artifact }}
+            companion/packaging/windows/Output/*.exe
+          if-no-files-found: error
