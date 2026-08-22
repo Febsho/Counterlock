@@ -64,17 +64,19 @@ deadlock_api_base = "https://api.deadlock-api.com/v1"
 # Module the offsets below are relative to.
 client_module = "client.dll"
 
-# Game-state names indexed by the engine's game-state enum value. The reader
-# treats "GameInProgress" as live and HeroSelection / MatchIntro / PreGameWait
-# as roster-ready pre-game phases; everything else reports no match.
-#states = ["Init", "WaitingForPlayersToJoin", "HeroSelection", "PreGameWait",
-#          "MatchIntro", "GameInProgress", "PostGame", "GameOver"]
-
 # Offsets change on EVERY game patch, so none ship with a value. Fill them from
 # an offset dump for the build you are running. Any offset left out disables
 # exactly the field it feeds. Without the four essentials
 # (client.game_rules, rules.game_state, client.entity_system, player.steam_id)
 # the provider logs what is missing and falls back to the public API.
+
+[offsets]
+# Game-state names indexed by the engine's game-state enum value. The reader
+# treats "GameInProgress" as live and HeroSelection / MatchIntro / PreGameWait
+# as roster-ready pre-game phases; everything else reports no match. This key
+# belongs to [offsets] itself, so it must stay above the subtables below.
+#states = ["Init", "WaitingForPlayersToJoin", "HeroSelection", "PreGameWait",
+#          "MatchIntro", "GameInProgress", "PostGame", "GameOver"]
 
 [offsets.client]
 # Offsets from the client_module base.
