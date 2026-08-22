@@ -40,3 +40,8 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# rust companion
+/companion/target/
+/companion/packaging/windows/Output/
+tsconfig.tsbuildinfo

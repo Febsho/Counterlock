@@ -38,6 +38,28 @@ Create the static GitHub Pages export:
 GITHUB_REPOSITORY=Febsho/deadlock-counterlock npm run build:pages
 ```
 
+## Local companion
+
+The web app polls an optional local companion on `http://127.0.0.1:9876` every 8 seconds.
+The companion is a Rust binary in [companion/](companion/) that also serves this UI, so
+`http://127.0.0.1:9876` is the whole app offline. Build both with:
+
+```bash
+npm run build:companion
+```
+
+See [companion/README.md](companion/README.md) for install, permissions, data sources, and limitations.
+
+| Endpoint | Response |
+| --- | --- |
+| `GET /v1/status` | `{ in_game, account_id, match_id, joined_at, hud_capture_available?, roster_available? }` |
+| `GET /v1/roster` | `{ match_id, account_id, duration_s, match_mode_parsed, players: [{ account_id, hero_id, team }] }` |
+| `GET /v1/hud-capture` | PNG image of the current scoreboard |
+
+When `roster_available` is true the app imports the roster straight from `/v1/roster`, which also
+covers matches that are not visible in Deadlock's public Watch tab. If the endpoint is missing or
+fails, the app falls back to the public active-match lookup and then to screenshot OCR.
+
 ## Data and privacy
 
 Matchup and item statistics come from [Deadlock API](https://deadlock-api.com/). Screenshot recognition runs in the browser with Tesseract.js; uploaded images are not sent to this project or stored by it.
