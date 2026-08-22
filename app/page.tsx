@@ -39,7 +39,8 @@ type SteamProfile = { account_id: number; personaname: string; profileurl: strin
 type ActiveMatchPlayer = { account_id: number | null; hero_id: number | null; team: number | null };
 type ActiveMatch = { match_id: number | null; start_time: number | null; duration_s: number | null; match_mode_parsed: string | null; players: ActiveMatchPlayer[] };
 type PatchNote = { title: string; pub_date: string; link: string };
-type CompanionStatus = { in_game: boolean; account_id: number | null; match_id: number | null; joined_at: number | null; hud_capture_available?: boolean };
+type CompanionStatus = { in_game: boolean; account_id: number | null; match_id: number | null; joined_at: number | null; hud_capture_available?: boolean; roster_available?: boolean };
+type CompanionRoster = { match_id: number | null; account_id: number | null; duration_s: number | null; match_mode_parsed: string | null; players: ActiveMatchPlayer[] };
 
 const copy = {
   en: {
@@ -72,7 +73,7 @@ const copy = {
     allyImporterText: "Upload a scoreboard screenshot and select the heroes on your side. Recognition runs locally on your device.",
     autoImporterTitle: "Paste full scoreboard", autoImporterText: "Press Ctrl+V with a scoreboard screenshot. Both teams and Yellow, Blue, and Green lanes are assigned automatically.", pasteHint: "PRESS CTRL+V TO PASTE A SCREENSHOT", autoImport: "IMPORT BOTH TEAMS + LANES", identifyYourHero: "WHICH HERO ARE YOU?", identifyHint: "Choose once—your player name is remembered on this device.", chooseYourHero: "Choose your hero in this match…",
     matchImport: "IMPORT CURRENT MATCH", matchImportText: "Paste a scoreboard for the most reliable import, or find a public Watch-tab match with Steam.",
-    liveImport: "FIND LIVE MATCH", screenshotImport: "PASTE SCOREBOARD", liveImportTitle: "IMPORT YOUR LIVE MATCH", liveImportText: "Use a SteamID64, numeric profile URL, account ID, or a Deadlock player name. Only public Watch-tab matches can be found.", steamPlaceholder: "SteamID64, numeric profile URL, or name…", findPlayer: "FIND MATCH", searchingPlayer: "SEARCHING…", chooseSteamProfile: "CHOOSE YOUR STEAM PROFILE", useProfile: "USE & FIND MATCH", liveMatchFound: "LIVE MATCH IMPORTED", liveMatchId: "MATCH", liveMatchMissing: "No public live match was found for this player. Only matches visible in Deadlock's Watch tab can be detected.", steamProfileMissing: "No matching Steam profile was found.", liveImportError: "The live-match service could not be reached. Try the screenshot import instead.", steamProfileLinkUnsupported: "Custom Steam profile links are unavailable on this static site. Paste your SteamID64 or numeric profile URL instead.", savedProfile: "SAVED PROFILE", forgetProfile: "FORGET", lanesEstimated: "Teams were imported automatically. Lane positions are estimated—paste a scoreboard screenshot to correct them.", closeLiveImport: "Close live match import",
+    rosterCaptured: "Roster captured by the local companion. Lane positions are estimated—paste a scoreboard screenshot to correct them.", liveImport: "FIND LIVE MATCH", screenshotImport: "PASTE SCOREBOARD", liveImportTitle: "IMPORT YOUR LIVE MATCH", liveImportText: "Use a SteamID64, numeric profile URL, account ID, or a Deadlock player name. Only public Watch-tab matches can be found.", steamPlaceholder: "SteamID64, numeric profile URL, or name…", findPlayer: "FIND MATCH", searchingPlayer: "SEARCHING…", chooseSteamProfile: "CHOOSE YOUR STEAM PROFILE", useProfile: "USE & FIND MATCH", liveMatchFound: "LIVE MATCH IMPORTED", liveMatchId: "MATCH", liveMatchMissing: "No public live match was found for this player. Only matches visible in Deadlock's Watch tab can be detected.", steamProfileMissing: "No matching Steam profile was found.", liveImportError: "The live-match service could not be reached. Try the screenshot import instead.", steamProfileLinkUnsupported: "Custom Steam profile links are unavailable on this static site. Paste your SteamID64 or numeric profile URL instead.", savedProfile: "SAVED PROFILE", forgetProfile: "FORGET", lanesEstimated: "Teams were imported automatically. Lane positions are estimated—paste a scoreboard screenshot to correct them.", closeLiveImport: "Close live match import",
     sampleConfidence: "CONFIDENCE", highConfidence: "HIGH", mediumConfidence: "MEDIUM", lowConfidence: "LIMITED", whyItem: "WHY THIS ITEM?", whyItemText: "This rank combines matchup lift, sample confidence, buy-time fit, and the selected target.",
     dropTitle: "Drop match screenshot here", dropText: "or click to choose a PNG, JPG, or WebP", scanning: "READING HERO NAMES", detected: "DETECTED HEROES", confidence: "match",
     importHeroes: "IMPORT SELECTED HEROES", scanAgain: "CHOOSE ANOTHER SCREENSHOT", noHeroes: "No hero names were detected. Try a sharper screenshot with the scoreboard fully visible.", close: "Close screenshot importer", localOnly: "PRIVATE · IMAGE NEVER LEAVES YOUR DEVICE",
@@ -110,7 +111,7 @@ const copy = {
     allyImporterText: "Lade einen Scoreboard-Screenshot hoch und wähle die Helden auf deiner Seite. Die Erkennung läuft lokal auf deinem Gerät.",
     autoImporterTitle: "Gesamtes Scoreboard einfügen", autoImporterText: "Drücke Strg+V mit einem Scoreboard-Screenshot. Beide Teams sowie gelbe, blaue und grüne Lane werden automatisch zugeordnet.", pasteHint: "STRG+V DRÜCKEN, UM EINEN SCREENSHOT EINFÜGEN", autoImport: "BEIDE TEAMS + LANES IMPORTIEREN", identifyYourHero: "WELCHER HELD BIST DU?", identifyHint: "Einmal auswählen—dein Spielername wird auf diesem Gerät gespeichert.", chooseYourHero: "Deinen Helden in diesem Match wählen…",
     matchImport: "AKTUELLES MATCH IMPORTIEREN", matchImportText: "Füge für den zuverlässigsten Import ein Scoreboard ein oder finde ein öffentliches Watch-Tab-Match über Steam.",
-    liveImport: "LIVE-MATCH FINDEN", screenshotImport: "SCOREBOARD EINFÜGEN", liveImportTitle: "DEIN LIVE-MATCH IMPORTIEREN", liveImportText: "Nutze SteamID64, numerische Profil-URL, Account-ID oder einen Deadlock-Spielernamen. Nur öffentliche Watch-Tab-Matches sind auffindbar.", steamPlaceholder: "SteamID64, numerische Profil-URL oder Name…", findPlayer: "MATCH FINDEN", searchingPlayer: "SUCHE…", chooseSteamProfile: "WÄHLE DEIN STEAM-PROFIL", useProfile: "NUTZEN & MATCH FINDEN", liveMatchFound: "LIVE-MATCH IMPORTIERT", liveMatchId: "MATCH", liveMatchMissing: "Für diesen Spieler wurde kein öffentliches Live-Match gefunden. Erkannt werden nur Matches, die in Deadlocks Watch-Tab sichtbar sind.", steamProfileMissing: "Kein passendes Steam-Profil gefunden.", liveImportError: "Der Live-Match-Dienst ist gerade nicht erreichbar. Nutze stattdessen den Screenshot-Import.", steamProfileLinkUnsupported: "Benutzerdefinierte Steam-Profil-Links sind auf dieser statischen Website nicht verfügbar. Füge stattdessen SteamID64 oder eine numerische Profil-URL ein.", savedProfile: "GESPEICHERTES PROFIL", forgetProfile: "ENTFERNEN", lanesEstimated: "Beide Teams wurden automatisch importiert. Die Lanes sind geschätzt—füge einen Scoreboard-Screenshot ein, um sie zu korrigieren.", closeLiveImport: "Live-Match-Import schließen",
+    rosterCaptured: "Aufstellung vom lokalen Companion erfasst. Die Lanes sind geschätzt—füge einen Scoreboard-Screenshot ein, um sie zu korrigieren.", liveImport: "LIVE-MATCH FINDEN", screenshotImport: "SCOREBOARD EINFÜGEN", liveImportTitle: "DEIN LIVE-MATCH IMPORTIEREN", liveImportText: "Nutze SteamID64, numerische Profil-URL, Account-ID oder einen Deadlock-Spielernamen. Nur öffentliche Watch-Tab-Matches sind auffindbar.", steamPlaceholder: "SteamID64, numerische Profil-URL oder Name…", findPlayer: "MATCH FINDEN", searchingPlayer: "SUCHE…", chooseSteamProfile: "WÄHLE DEIN STEAM-PROFIL", useProfile: "NUTZEN & MATCH FINDEN", liveMatchFound: "LIVE-MATCH IMPORTIERT", liveMatchId: "MATCH", liveMatchMissing: "Für diesen Spieler wurde kein öffentliches Live-Match gefunden. Erkannt werden nur Matches, die in Deadlocks Watch-Tab sichtbar sind.", steamProfileMissing: "Kein passendes Steam-Profil gefunden.", liveImportError: "Der Live-Match-Dienst ist gerade nicht erreichbar. Nutze stattdessen den Screenshot-Import.", steamProfileLinkUnsupported: "Benutzerdefinierte Steam-Profil-Links sind auf dieser statischen Website nicht verfügbar. Füge stattdessen SteamID64 oder eine numerische Profil-URL ein.", savedProfile: "GESPEICHERTES PROFIL", forgetProfile: "ENTFERNEN", lanesEstimated: "Beide Teams wurden automatisch importiert. Die Lanes sind geschätzt—füge einen Scoreboard-Screenshot ein, um sie zu korrigieren.", closeLiveImport: "Live-Match-Import schließen",
     sampleConfidence: "SICHERHEIT", highConfidence: "HOCH", mediumConfidence: "MITTEL", lowConfidence: "BEGRENZT", whyItem: "WARUM DIESES ITEM?", whyItemText: "Das Ranking kombiniert Matchup-Lift, Stichprobenqualität, Kaufzeit und das gewählte Ziel.",
     dropTitle: "Match-Screenshot hier ablegen", dropText: "oder klicken, um PNG, JPG oder WebP auszuwählen", scanning: "HELDENNAMEN WERDEN GELESEN", detected: "ERKANNTE HELDEN", confidence: "Treffer",
     importHeroes: "AUSGEWÄHLTE HELDEN IMPORTIEREN", scanAgain: "ANDEREN SCREENSHOT WÄHLEN", noHeroes: "Keine Heldennamen erkannt. Versuche einen schärferen Screenshot mit vollständig sichtbarem Scoreboard.", close: "Screenshot-Import schließen", localOnly: "PRIVAT · DAS BILD BLEIBT AUF DEINEM GERÄT",
@@ -371,6 +372,7 @@ export default function Home() {
   const analysisRunRef = useRef(0);
   const companionMatchRef = useRef<number | null>(null);
   const companionCaptureRef = useRef<number | null>(null);
+  const companionRosterRef = useRef<number | null>(null);
   const t = copy[lang];
   const phase: Phase = gameMinute < 11 ? "early" : gameMinute < 21 ? "mid" : "late";
 
@@ -457,7 +459,7 @@ export default function Home() {
         if (!response.ok) throw new Error("companion unavailable");
         const status = await response.json() as CompanionStatus;
         if (!mounted) return;
-        setCompanionStatus(status.in_game ? "waiting" : "connected");
+        setCompanionStatus(status.in_game ? "connected" : "waiting");
         if (status.in_game && status.match_id && status.hud_capture_available && companionCaptureRef.current !== status.match_id) {
           companionCaptureRef.current = status.match_id;
           try {
@@ -469,9 +471,15 @@ export default function Home() {
             void readScreenshot(new File([blob], "counterlock-live-hud.png", { type: "image/png" }), "auto");
           } catch { companionCaptureRef.current = null; }
         }
-        if (!status.in_game || !status.match_id || !status.account_id || importedMatchId === status.match_id) return;
+        if (!status.in_game || !status.match_id || importedMatchId === status.match_id) return;
         companionMatchRef.current = status.match_id;
         setLiveImportOpen(true);
+        if (status.roster_available && companionRosterRef.current !== status.match_id) {
+          companionRosterRef.current = status.match_id;
+          try { await importCompanionRoster(); if (mounted) return; } catch { companionRosterRef.current = null; }
+          if (!mounted) return;
+        }
+        if (!status.account_id) return;
         void importLiveMatch({ account_id: status.account_id, personaname: `Steam ${status.account_id}`, profileurl: "", avatar: "" });
       } catch { if (mounted) setCompanionStatus("offline"); }
     };
@@ -654,6 +662,32 @@ export default function Home() {
       return accountId > BigInt(0) && accountId <= maxAccountId ? Number(accountId) : null;
     } catch { return null; }
   }
+  function applyMatchRoster(players: ActiveMatchPlayer[], ownAccountId: number, meta: { duration_s?: number | null; start_time?: number | null; match_mode_parsed?: string | null }) {
+    const ownPlayer = players.find((player) => player.account_id === ownAccountId);
+    if (ownPlayer?.hero_id == null || ownPlayer.team == null) return false;
+    const allies = players.filter((player) => player.team === ownPlayer.team && player.account_id !== ownAccountId && player.hero_id).map((player) => player.hero_id!).slice(0, 5);
+    const enemies = players.filter((player) => player.team !== ownPlayer.team && player.hero_id).map((player) => player.hero_id!).slice(0, 6);
+    if (!enemies.length) return false;
+    const assignments: Record<number, Exclude<Lane, "all">> = {};
+    const assignByPosition = (ids: number[]) => ids.forEach((id, index) => { assignments[id] = index < 2 ? "yellow" : index < 4 ? "blue" : "green"; });
+    assignByPosition([ownPlayer.hero_id, ...allies]); assignByPosition(enemies);
+    setHeroId(ownPlayer.hero_id); setAllyIds(allies); setEnemyIds(enemies); setCarryId(enemies[0]); setLaneOpponentId(enemies[0]); setLaneAssignments(assignments);
+    setLane(assignments[ownPlayer.hero_id] ?? "yellow"); setLaneOnly(true); setBuyTarget("team");
+    const elapsed = meta.duration_s ?? (meta.start_time ? Math.floor(Date.now() / 1000) - meta.start_time : 0);
+    if (elapsed > 0) setGameMinute(Math.max(1, Math.min(40, Math.round(elapsed / 60))));
+    if (meta.match_mode_parsed?.toLowerCase().includes("ranked")) setQueueMode("ranked");
+    else if (meta.match_mode_parsed?.toLowerCase().includes("unranked")) setQueueMode("unranked");
+    return true;
+  }
+  async function importCompanionRoster() {
+    const response = await fetch("http://127.0.0.1:9876/v1/roster", { cache: "no-store" });
+    if (!response.ok) throw new Error("roster unavailable");
+    const roster = await response.json() as CompanionRoster;
+    if (!roster.account_id || !roster.players?.length) throw new Error("roster incomplete");
+    if (!applyMatchRoster(roster.players, roster.account_id, roster)) throw new Error("roster incomplete");
+    setImportedMatchId(roster.match_id); setLiveImportMessage(t.rosterCaptured);
+    return roster.match_id;
+  }
   async function importLiveMatch(profile: SteamProfile) {
     setLiveImportBusy(true); setSteamCandidates([]); setLiveImportMessage(""); setImportedMatchId(null);
     window.localStorage.setItem("counterlock-steam-profile", JSON.stringify(profile));
@@ -663,20 +697,7 @@ export default function Home() {
       if (!response.ok) throw new Error("active-match lookup failed");
       const matches = await response.json() as ActiveMatch[];
       const match = matches.find((entry) => entry.players.some((player) => player.account_id === profile.account_id));
-      const ownPlayer = match?.players.find((player) => player.account_id === profile.account_id);
-      if (!match || ownPlayer?.hero_id == null || ownPlayer.team == null) { setLiveImportMessage(t.liveMatchMissing); return; }
-      const allies = match.players.filter((player) => player.team === ownPlayer.team && player.account_id !== profile.account_id && player.hero_id).map((player) => player.hero_id!).slice(0, 5);
-      const enemies = match.players.filter((player) => player.team !== ownPlayer.team && player.hero_id).map((player) => player.hero_id!).slice(0, 6);
-      if (!enemies.length) { setLiveImportMessage(t.liveMatchMissing); return; }
-      const assignments: Record<number, Exclude<Lane, "all">> = {};
-      const assignByPosition = (ids: number[]) => ids.forEach((id, index) => { assignments[id] = index < 2 ? "yellow" : index < 4 ? "blue" : "green"; });
-      assignByPosition([ownPlayer.hero_id, ...allies]); assignByPosition(enemies);
-      setHeroId(ownPlayer.hero_id); setAllyIds(allies); setEnemyIds(enemies); setCarryId(enemies[0]); setLaneOpponentId(enemies[0]); setLaneAssignments(assignments);
-      setLane(assignments[ownPlayer.hero_id] ?? "yellow"); setLaneOnly(true); setBuyTarget("team");
-      const elapsed = match.duration_s ?? (match.start_time ? Math.floor(Date.now() / 1000) - match.start_time : 0);
-      if (elapsed > 0) setGameMinute(Math.max(1, Math.min(40, Math.round(elapsed / 60))));
-      if (match.match_mode_parsed?.toLowerCase().includes("ranked")) setQueueMode("ranked");
-      else if (match.match_mode_parsed?.toLowerCase().includes("unranked")) setQueueMode("unranked");
+      if (!match || !applyMatchRoster(match.players, profile.account_id, match)) { setLiveImportMessage(t.liveMatchMissing); return; }
       setImportedMatchId(match.match_id); setLiveImportMessage(t.lanesEstimated);
     } catch { setLiveImportMessage(t.liveImportError); }
     finally { setLiveImportBusy(false); }
