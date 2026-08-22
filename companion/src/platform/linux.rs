@@ -39,26 +39,34 @@ impl LinuxProcessDetector {
 
 impl ProcessDetector for LinuxProcessDetector {
     fn is_game_running(&mut self) -> bool {
-        let Ok(entries) = fs::read_dir("/proc") else {
-            return false;
-        };
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else { continue };
-            // Only numeric entries are processes.
-            if !name.bytes().all(|b| b.is_ascii_digit()) {
-                continue;
-            }
-            // `comm` is truncated to 15 bytes by the kernel, so a long name such
-            // as "project8.exe" is safe but anything longer would need cmdline.
-            if let Ok(comm) = fs::read_to_string(entry.path().join("comm")) {
-                if is_deadlock_process(comm.trim()) {
-                    return true;
-                }
-            }
-        }
-        false
+        game_pid().is_some()
     }
+}
+
+/// Pid of the running game, or `None`.
+///
+/// Under Proton several processes can share the name, so callers that need to
+/// read the client (the attached provider) must still confirm the pid actually
+/// mapped `client.dll` before trusting it.
+pub fn game_pid() -> Option<u32> {
+    let entries = fs::read_dir("/proc").ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        // Only numeric entries are processes.
+        if !name.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        // `comm` is truncated to 15 bytes by the kernel, so a long name such
+        // as "project8.exe" is safe but anything longer would need cmdline.
+        let Ok(comm) = fs::read_to_string(entry.path().join("comm")) else {
+            continue;
+        };
+        if is_deadlock_process(comm.trim()) {
+            return name.parse().ok();
+        }
+    }
+    None
 }
 
 /// Screen-capture commands to try, in order, for the current session.

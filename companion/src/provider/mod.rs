@@ -9,6 +9,7 @@ use crate::state::MatchSnapshot;
 use anyhow::Result;
 use serde::Serialize;
 
+pub mod attached;
 pub mod deadlock_api;
 
 /// Which fields a provider can populate.

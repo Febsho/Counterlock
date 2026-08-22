@@ -17,9 +17,13 @@ port = 9876
 allowed_origins = []
 
 # Telemetry source:
-#   "deadlock-api"  public Deadlock API (matches/active)
+#   "attached"      read the running game client (default). The only source
+#                   that reports per-player KDA, souls and pause state. Needs
+#                   the offsets below and CAP_SYS_PTRACE; falls back to
+#                   "deadlock-api" whenever it cannot read the process.
+#   "deadlock-api"  public Deadlock API (matches/active), roster-level only
 #   "none"          serve the UI only, report no match data
-provider = "deadlock-api"
+provider = "attached"
 
 # Poll cadence while a match is live, in milliseconds. Clamped to 1000-2000.
 in_match_poll_ms = 1500
@@ -45,3 +49,61 @@ json_logs = false
 
 # Base URL of the Deadlock API.
 deadlock_api_base = "https://api.deadlock-api.com/v1"
+
+# ---------------------------------------------------------------------------
+# Attached reader
+#
+# Only used when provider = "attached". The reader is strictly read-only: it
+# opens /proc/<pid>/mem, follows the entity list, and copies out the scoreboard
+# values the client already draws. It never writes to the process.
+#
+# Reading another process's memory is detectable by anti-cheat and is against
+# Deadlock's terms of service. Set provider = "deadlock-api" to avoid it.
+# ---------------------------------------------------------------------------
+
+# Module the offsets below are relative to.
+client_module = "client.dll"
+
+# Game-state names indexed by the engine's game-state enum value. The reader
+# treats "GameInProgress" as live and HeroSelection / MatchIntro / PreGameWait
+# as roster-ready pre-game phases; everything else reports no match.
+#states = ["Init", "WaitingForPlayersToJoin", "HeroSelection", "PreGameWait",
+#          "MatchIntro", "GameInProgress", "PostGame", "GameOver"]
+
+# Offsets change on EVERY game patch, so none ship with a value. Fill them from
+# an offset dump for the build you are running. Any offset left out disables
+# exactly the field it feeds. Without the four essentials
+# (client.game_rules, rules.game_state, client.entity_system, player.steam_id)
+# the provider logs what is missing and falls back to the public API.
+
+[offsets.client]
+# Offsets from the client_module base.
+#entity_system = 0x0      # CGameEntitySystem*
+#game_rules    = 0x0      # CCitadelGameRules*
+#global_vars   = 0x0      # CGlobalVars*, for the authoritative match clock
+max_entities = 64         # controllers sit at low entity indices
+
+[offsets.entity]
+# Two-level entity table layout. Stable across Source 2 builds, so unlike the
+# rest these ship with working values.
+chunk_table = 0x10
+chunk_size = 512
+entry_stride = 120
+
+[offsets.player]
+# Fields inside CCitadelPlayerController.
+#steam_id  = 0x0          # m_steamID (also the "is this a controller" test)
+#hero_id   = 0x0          # m_nHeroID
+#team      = 0x0          # m_iTeamNum
+#net_worth = 0x0          # m_iGoldNetWorth -> souls, and souls/minute
+#kills     = 0x0          # m_iPlayerKills
+#deaths    = 0x0          # m_iDeaths
+#assists   = 0x0          # m_iAssists
+
+[offsets.rules]
+# Fields inside the game-rules object (cur_time is inside CGlobalVars).
+#game_state      = 0x0     # m_eGameState
+#game_start_time = 0x0     # m_flGameStartTime
+#match_id        = 0x0     # m_unMatchID
+#paused          = 0x0     # m_bMatchPaused
+#cur_time        = 0x0     # CGlobalVars::curtime

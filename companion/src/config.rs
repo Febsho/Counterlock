@@ -12,10 +12,165 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderKind {
+    /// Attached game-state reader, falling back to [`ProviderKind::DeadlockApi`]
+    /// whenever the process cannot be read or the offsets do not fit the
+    /// running build. The only source that can report per-player combat stats.
+    Attached,
     /// Public Deadlock API (`matches/active`). Documented and permitted.
     DeadlockApi,
     /// No telemetry: serve the UI and report process state only.
     None,
+}
+
+/// Offsets for the attached reader.
+///
+/// These move on every game patch, so nothing here ships with a value. Each
+/// one is optional: a missing offset disables exactly the field it feeds
+/// instead of taking the reader down, and the provider falls back to the public
+/// API when the essential ones are absent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Offsets {
+    pub client: ClientOffsets,
+    pub entity: EntityLayout,
+    pub player: PlayerOffsets,
+    pub rules: RulesOffsets,
+    /// Game-state names indexed by the engine's game-state enum value.
+    /// Reorder to match the build you are on.
+    pub states: Vec<String>,
+}
+
+impl Default for Offsets {
+    fn default() -> Self {
+        Self {
+            client: ClientOffsets::default(),
+            entity: EntityLayout::default(),
+            player: PlayerOffsets::default(),
+            rules: RulesOffsets::default(),
+            states: [
+                "Init",
+                "WaitingForPlayersToJoin",
+                "HeroSelection",
+                "PreGameWait",
+                "MatchIntro",
+                "GameInProgress",
+                "PostGame",
+                "GameOver",
+            ]
+            .iter()
+            .map(|state| (*state).to_string())
+            .collect(),
+        }
+    }
+}
+
+impl Offsets {
+    /// Whether the minimum set needed to report anything is present.
+    pub fn usable(&self) -> bool {
+        self.client.game_rules.is_some()
+            && self.rules.game_state.is_some()
+            && self.client.entity_system.is_some()
+            && self.player.steam_id.is_some()
+    }
+
+    /// Names of the offsets that must be filled in before the reader can run.
+    pub fn missing_essentials(&self) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        for (present, name) in [
+            (self.client.game_rules.is_some(), "client.game_rules"),
+            (self.rules.game_state.is_some(), "rules.game_state"),
+            (self.client.entity_system.is_some(), "client.entity_system"),
+            (self.player.steam_id.is_some(), "player.steam_id"),
+        ] {
+            if !present {
+                missing.push(name);
+            }
+        }
+        missing
+    }
+}
+
+/// Offsets relative to the `client.dll` module base.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ClientOffsets {
+    /// `CGameEntitySystem*`
+    pub entity_system: Option<u64>,
+    /// `CCitadelGameRules*`
+    pub game_rules: Option<u64>,
+    /// `CGlobalVars*`, for the authoritative match clock.
+    pub global_vars: Option<u64>,
+    /// Highest entity index scanned for player controllers.
+    pub max_entities: u32,
+}
+
+impl Default for ClientOffsets {
+    fn default() -> Self {
+        Self {
+            entity_system: None,
+            game_rules: None,
+            global_vars: None,
+            // Controllers sit at low entity indices; scanning further just
+            // costs reads.
+            max_entities: 64,
+        }
+    }
+}
+
+/// Layout of the two-level entity table. Stable across Source 2 builds, so
+/// unlike the rest these do ship with working values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EntityLayout {
+    pub chunk_table: u64,
+    pub chunk_size: u64,
+    pub entry_stride: u64,
+}
+
+impl Default for EntityLayout {
+    fn default() -> Self {
+        Self {
+            chunk_table: 0x10,
+            chunk_size: 512,
+            entry_stride: 120,
+        }
+    }
+}
+
+/// Field offsets inside `CCitadelPlayerController`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PlayerOffsets {
+    /// `m_steamID`, also the validity check for "is this a controller".
+    pub steam_id: Option<u64>,
+    /// `m_nHeroID`
+    pub hero_id: Option<u64>,
+    /// `m_iTeamNum`
+    pub team: Option<u64>,
+    /// `m_iGoldNetWorth` — current souls, and the numerator for souls/minute.
+    pub net_worth: Option<u64>,
+    /// `m_iPlayerKills`
+    pub kills: Option<u64>,
+    /// `m_iDeaths`
+    pub deaths: Option<u64>,
+    /// `m_iAssists`
+    pub assists: Option<u64>,
+}
+
+/// Field offsets inside the game-rules object (`cur_time` is in `CGlobalVars`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RulesOffsets {
+    /// `m_eGameState`
+    pub game_state: Option<u64>,
+    /// `m_flGameStartTime`
+    pub game_start_time: Option<u64>,
+    /// `m_unMatchID`
+    pub match_id: Option<u64>,
+    /// `m_bMatchPaused`
+    pub paused: Option<u64>,
+    /// `CGlobalVars::curtime`
+    pub cur_time: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +198,11 @@ pub struct Config {
     pub json_logs: bool,
     /// Base URL of the Deadlock API.
     pub deadlock_api_base: String,
+    /// Module the attached reader resolves its offsets against.
+    pub client_module: String,
+    /// Offsets for the attached reader. Empty by default; see the example
+    /// config for what each one is.
+    pub offsets: Offsets,
 }
 
 impl Default for Config {
@@ -50,7 +210,7 @@ impl Default for Config {
         Self {
             port: 9876,
             allowed_origins: Vec::new(),
-            provider: ProviderKind::DeadlockApi,
+            provider: ProviderKind::Attached,
             in_match_poll_ms: 1500,
             idle_poll_ms: 8000,
             account_id: None,
@@ -58,6 +218,8 @@ impl Default for Config {
             allow_uploads: false,
             json_logs: false,
             deadlock_api_base: "https://api.deadlock-api.com/v1".to_string(),
+            client_module: "client.dll".to_string(),
+            offsets: Offsets::default(),
         }
     }
 }

@@ -7,6 +7,8 @@
 mod assets;
 mod capture;
 mod config;
+#[cfg(unix)]
+mod game;
 mod logging;
 mod platform;
 mod provider;
@@ -17,7 +19,9 @@ mod steam;
 use anyhow::Result;
 use config::{Config, ProviderKind};
 use platform::{GameLifecycle, LifecycleEvent};
-use provider::{deadlock_api::DeadlockApiProvider, MatchDataProvider, NullProvider};
+use provider::{
+    attached::AttachedProvider, deadlock_api::DeadlockApiProvider, MatchDataProvider, NullProvider,
+};
 use server::{AppState, SharedState};
 use state::unix_now;
 use std::sync::{Arc, RwLock};
@@ -46,6 +50,7 @@ fn main() -> Result<()> {
     }
 
     let provider: Box<dyn MatchDataProvider> = match config.provider {
+        ProviderKind::Attached => Box::new(AttachedProvider::new(config.clone())),
         ProviderKind::DeadlockApi => {
             Box::new(DeadlockApiProvider::new(config.deadlock_api_base.clone()))
         }
@@ -142,7 +147,12 @@ fn refresh(
     current_match: &mut Option<u64>,
 ) -> bool {
     let account_id = shared.read().unwrap().account_id;
-    match provider.fetch(account_id) {
+    let result = provider.fetch(account_id);
+    // Re-read after fetching: a provider that falls back between sources
+    // reports different capabilities depending on which one answered, and
+    // `/v1/capabilities` must describe the source behind the last snapshot.
+    shared.write().unwrap().capabilities = provider.capabilities();
+    match result {
         Ok(Some(snapshot)) => {
             if *current_match != snapshot.match_id {
                 tracing::info!(match_id = ?snapshot.match_id, players = snapshot.players.len(), "match started");
