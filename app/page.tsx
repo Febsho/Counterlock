@@ -693,30 +693,33 @@ export default function Home() {
     const runId = ++analysisRunRef.current;
     setLoading(true); setError(""); setCopied(false);
     try {
+      // Keep a usable build pool for less frequently played heroes and recent
+      // balance windows. The UI can still apply its own higher confidence
+      // threshold when displaying statistical comparisons.
       const commonParams = new URLSearchParams({ min_matches: "80", game_mode: "normal", min_unix_timestamp: String(Math.floor(Date.now() / 1000) - dataWindow * 86400) });
       if (queueMode !== "all") commonParams.set("match_mode", queueMode);
       const common = commonParams.toString();
       const matchupParams = new URLSearchParams(commonParams); matchupParams.set("same_lane_filter", String(laneOnly));
       const matchupCommon = matchupParams.toString();
-      const laneCounterParams = new URLSearchParams(commonParams); laneCounterParams.set("same_lane_filter", "true");
-      const responses = await Promise.allSettled([
-        cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(common))),
       const livePurchaseParams = desktopStatus?.in_game && desktopLiveMatch?.game_time_s != null ? new URLSearchParams(matchupCommon) : null;
       if (livePurchaseParams) {
         const windowCenter = Math.floor(effectiveGameTimeSeconds / 300) * 300;
         livePurchaseParams.set("min_bought_at_s", String(Math.max(0, windowCenter - 300)));
         livePurchaseParams.set("max_bought_at_s", String(windowCenter + 600));
       }
+      const laneCounterParams = new URLSearchParams(commonParams); laneCounterParams.set("same_lane_filter", "true");
+      const responses = await Promise.allSettled([
+        cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(common))),
         cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), enemyIds, true)),
         cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), [carryId])),
         cachedJson<CounterStat[]>(`${API}/analytics/hero-counter-stats?${matchupCommon}`),
         cachedJson<CounterStat[]>(`${API}/analytics/hero-counter-stats?${laneCounterParams}`),
         Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), [enemyId])))),
         Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(enemyId, new URLSearchParams(common))))),
+        livePurchaseParams ? Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(livePurchaseParams), [enemyId])))) : Promise.resolve([]),
       ] as const);
       const unwrap = <T,>(result: PromiseSettledResult<T>, label: string, fallback: T): T => {
         if (result.status === "fulfilled") return result.value;
-        livePurchaseParams ? Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(livePurchaseParams), [enemyId])))) : Promise.resolve([]),
         console.warn(`Deadlock API ${label} unavailable; recommendations will use remaining evidence.`, result.reason);
         return fallback;
       };
@@ -732,10 +735,10 @@ export default function Home() {
       });
       const individualEnemyStats = settlePerEnemy(unwrap(responses[5], "individual enemy item stats", []), "individual enemy item stats");
       const enemyBuildStats = settlePerEnemy(unwrap(responses[6], "common enemy item stats", []), "common enemy item stats");
+      const livePurchaseStats = settlePerEnemy(unwrap(responses[7], "live purchase-time matchup statistics", []), "live purchase-time matchup statistics");
       const flowQuery = new URLSearchParams(commonParams); flowQuery.set("hero_ids", String(heroId));
       const flowResult = await Promise.allSettled([itemFlowStats(`${API}/analytics/item-flow-stats?${flowQuery}`)]);
       if (runId !== analysisRunRef.current) return;
-      const livePurchaseStats = settlePerEnemy(unwrap(responses[7], "live purchase-time matchup statistics", []), "live purchase-time matchup statistics");
       setItemFlow(flowResult[0].status === "fulfilled" ? flowResult[0].value : null);
       if (flowResult[0].status === "rejected") console.warn("Optional Deadlock item-flow data unavailable; continuing with item and matchup statistics.", flowResult[0].reason);
       if (runId !== analysisRunRef.current) return;
@@ -805,7 +808,7 @@ export default function Home() {
           enemyRates: entry.enemyRates.filter((rate) => rate.heroId === carryId).map(({ heroId, rate, matches }) => ({ heroId, rate, matches })) };
       }), carryThreats, effectiveGameTimeSeconds);
       const carryRankedById = new Map(carryRanked.map((entry) => [entry.itemId, entry]));
-      setRecommendations(calculated.map((entry) => { const scored = rankedById.get(entry.item.id); const carryScored = carryRankedById.get(entry.item.id); const advisorReason = scored?.reason.replace(/Hero #(\d+)/g, (_match, id: string) => heroMap.get(Number(id))?.name ?? `Hero #${id}`); return { ...entry, carryScore: carryScored?.score ?? 0, teamScore: scored?.score ?? 0, advisorReason, coreFit: scored?.coreFit, counterFit: scored?.counterFit, mechanicFit: scored?.mechanicFit, exactFit: scored?.exactFit, threatTargets: scored?.threatTargets }; }));
+      setRecommendations(calculated.map((entry) => { const scored = rankedById.get(entry.item.id); const carryScored = carryRankedById.get(entry.item.id); const advisorReason = scored?.reason.replace(/Hero #(\d+)/g, (_match, id: string) => heroMap.get(Number(id))?.name ?? `Hero #${id}`); return { ...entry, carryScore: carryScored?.score ?? 0, teamScore: scored?.score ?? 0, advisorReason, coreFit: scored?.coreFit, counterFit: scored?.counterFit, counterUrgency: scored?.counterUrgency, mechanicFit: scored?.mechanicFit, exactFit: scored?.exactFit, threatTargets: scored?.threatTargets }; }));
       setAllCounterStats(counterStats);
       setLaneCounterStats(laneStats);
       setMatchup(counterStats.find((stat) => stat.hero_id === heroId && stat.enemy_hero_id === carryId) ?? null);
@@ -912,12 +915,12 @@ export default function Home() {
       return { hero, score: Math.max(.35, Math.min(.65, .5 + (weightedLift / totalWeight) * coverageFactor)), carryRate, matches, coverage };
     }).filter((entry): entry is CounterPick => Boolean(entry)).sort((a, b) => b.score - a.score);
   }, [allCounterStats, carryId, enemyIds, heroes]);
+  const liveAdviceForMatch = desktopAdvice?.match_id === desktopLiveMatch?.match_id ? desktopAdvice : null;
+  const localLiveNextBuyId = fullBuildPlan.nextBuyOrder.find((entry) => !allOwnedItemIds.includes(entry.itemId))?.itemId;
   const nextBuy = desktopStatus?.in_game
     ? recommendations.find((entry) => entry.item.id === liveAdviceForMatch?.recommended?.item_id && !allOwnedItemIds.includes(entry.item.id))
       ?? recommendations.find((entry) => entry.item.id === localLiveNextBuyId && !allOwnedItemIds.includes(entry.item.id))
     : visibleRecommendations.find((entry) => !allOwnedItemIds.includes(entry.item.id));
-  const liveAdviceForMatch = desktopAdvice?.match_id === desktopLiveMatch?.match_id ? desktopAdvice : null;
-  const localLiveNextBuyId = fullBuildPlan.nextBuyOrder.find((entry) => !allOwnedItemIds.includes(entry.itemId))?.itemId;
   const liveAdvice = desktopStatus?.in_game ? liveAdviceForMatch?.recommended : null;
   const activeAlerts = [lifestealDetected ? t.lifestealDetected : null, threats.healing ? t.alertHealing : null, threats.weapon ? t.alertWeapon : null, threats.spirit ? t.alertSpirit : null, threats.crowdControl ? t.alertCrowdControl : null].filter((alert): alert is NonNullable<typeof alert> => alert !== null);
   const fullBuildCost = fullBuildPlan.purchaseOrder.reduce((sum, entry) => sum + (entry.item.cost ?? 0), 0);
