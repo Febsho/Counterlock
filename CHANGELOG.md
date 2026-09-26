@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.4
+
+- Redesigned the Tauri desktop shell with compact navigation and a contextual
+  match header; the public website is unchanged.
+- Prioritized the live team roster, relative enemy threats, and current Next
+  Buy, with expandable player profiles and a denser Build Lab.
+- Added cached, batched account-ID profile enrichment, rank badges, and a
+  compact overlay showing the next purchase and top threat.
+- Expanded live threat and purchase context while preserving unknown values
+  when a profile source or telemetry field is unavailable.
+
 ## 0.1.3
 
 - Added Windows support for the existing read-only, exact-build game reader in

@@ -5,10 +5,24 @@ const itemCounterTags: Readonly<Record<string, Partial<Record<ThreatTag, number>
   upgrade_metal_skin: { weapon_dps: 0.9, weapon_burst: 0.8 },
   upgrade_spirit_armor: { spirit_damage: 0.9 },
   upgrade_healbane: { healing: 0.85, sustain: 0.75 },
+  upgrade_spirit_burn: { healing: 0.85, sustain: 0.75 },
   upgrade_rupture: { healing: 0.8, sustain: 0.7 }, // Decay's current asset class name
   upgrade_debuff_reducer: { hard_cc: 0.8, soft_cc: 0.7 },
   upgrade_unstoppable: { hard_cc: 0.95, soft_cc: 0.8 },
 };
+
+// These items apply the same healing-reduction counter. Avoid spending another
+// slot and its souls on a duplicate effect when one is already in the inventory.
+const itemCounterRoles: Readonly<Record<string, readonly string[]>> = {
+  upgrade_healbane: ["healing_reduction"],
+  upgrade_spirit_burn: ["healing_reduction"],
+  upgrade_rupture: ["healing_reduction"],
+};
+
+export function hasCounterRoleOverlap(className: string | null | undefined, ownedClassNames: ReadonlySet<string>) {
+  const roles = className ? itemCounterRoles[className] : undefined;
+  return Boolean(roles?.some((role) => [...ownedClassNames].some((owned) => itemCounterRoles[owned]?.includes(role))));
+}
 
 export function tagsForItem(className: string | null | undefined): readonly ThreatTag[] {
   return className ? Object.keys(itemCounterTags[className] ?? {}) as ThreatTag[] : [];

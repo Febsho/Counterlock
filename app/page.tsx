@@ -8,13 +8,15 @@ import { cachedJson } from "./lib/data/cache";
 import { rankItems } from "./lib/build-engine/scoring";
 import { itemFlowStats, itemStatsUrl } from "./lib/data/deadlock-api";
 import { bestFlowPath, flowCoreFit, itemFlowPhase } from "./lib/build-engine/build-flow";
-import { counterCapability, tagsForItem, tagMatchesManualThreat } from "./lib/build-engine/counter-tags";
-import { threatsForHero } from "./lib/build-engine/hero-threats";
+import { counterCapability, hasCounterRoleOverlap, tagsForItem, tagMatchesManualThreat } from "./lib/build-engine/counter-tags";
+import { mergedHeroThreats, type HeroAbilityEvidence } from "./lib/build-engine/hero-threats";
 import { scoreThreats } from "./lib/build-engine/threat-score";
 import { buildUpgradeGraph } from "./lib/build-engine/upgrade-graph";
 import { optimizeSlots } from "./lib/build-engine/slot-optimizer";
 import { findSellDecisions, planPurchasePath, rankNextBuys, type PlanCandidate } from "./lib/build-engine/planner";
-import { fetchStatlockerProfiles, type StatlockerProfile, type StatlockerStatus } from "./lib/data/statlocker";
+import { fetchStatlockerProfiles, syncPersonalHeroProfile, type StatlockerProfile, type StatlockerStatus } from "./lib/data/statlocker";
+import { personalSignals, personalSequencePrior, rankCohort, rankDataHasCoverage, type PersonalHeroProfile } from "./lib/build-engine/personal-profile";
+import { completeRecommendationOutcome, recommendationOutcomeCache, recordRecommendationSnapshot } from "./lib/data/recommendation-outcomes";
 
 const API = "https://api.deadlock-api.com/v1";
 
@@ -44,7 +46,7 @@ type ItemStat = { item_id: number; wins: number; losses: number; matches: number
 type EnemyBuildSignal = { heroId: number; stats: ItemStat[] };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
-type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; exactMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[]; advisorReason?: string; coreFit?: number; counterFit?: number; counterUrgency?: number; mechanicFit?: number; exactFit?: number; threatTargets?: number[] };
+type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; exactMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[]; advisorReason?: string; coreFit?: number; counterFit?: number; counterUrgency?: number; mechanicFit?: number; exactFit?: number; personalFit?: number; threatTargets?: number[] };
 type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all">; isOwn?: boolean; playerName?: string };
 type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
 type ScoreboardSheet = { canvas: HTMLCanvasElement; rowHeight: number };
@@ -362,6 +364,7 @@ export default function Home() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [statlockerStatus, setStatlockerStatus] = useState<StatlockerStatus>("not_configured");
   const [liveProfiles, setLiveProfiles] = useState<Record<number, StatlockerProfile>>({});
+  const [personalHeroProfile, setPersonalHeroProfile] = useState<PersonalHeroProfile | null>(null);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
@@ -394,6 +397,15 @@ export default function Home() {
   const effectiveGameTimeSeconds = desktopStatus?.in_game && desktopLiveMatch?.game_time_s != null ? desktopLiveMatch.game_time_s : gameMinute * 60;
   const profileRosterKey = desktopLiveMatch?.players.map((player) => player.account_id).filter((id): id is number => id != null).sort((a, b) => a - b).filter((id, index, ids) => index === 0 || id !== ids[index - 1]).join(",") ?? "";
   const playerProfiles = useMemo(() => savedSteamProfile ? { ...liveProfiles, [savedSteamProfile.account_id]: liveProfiles[savedSteamProfile.account_id] ?? { accountId: savedSteamProfile.account_id, name: savedSteamProfile.personaname, avatarUrl: savedSteamProfile.avatar || null, ppScore: null, estimatedRankNumber: null, region: null } } : liveProfiles, [liveProfiles, savedSteamProfile]);
+  const ownAccountId = desktopLiveMatch?.account_id ?? savedSteamProfile?.account_id ?? null;
+
+  useEffect(() => {
+    const profile = ownAccountId == null ? null : playerProfiles[ownAccountId];
+    if (!profile || !heroId) return;
+    let active = true;
+    void syncPersonalHeroProfile(ownAccountId!, heroId, profile).then((result) => { if (active) setPersonalHeroProfile(result); });
+    return () => { active = false; };
+  }, [heroId, ownAccountId, playerProfiles]);
 
   useEffect(() => {
     if (!profileRosterKey) return;
@@ -696,7 +708,10 @@ export default function Home() {
       // Keep a usable build pool for less frequently played heroes and recent
       // balance windows. The UI can still apply its own higher confidence
       // threshold when displaying statistical comparisons.
-      const commonParams = new URLSearchParams({ min_matches: "80", game_mode: "normal", min_unix_timestamp: String(Math.floor(Date.now() / 1000) - dataWindow * 86400) });
+      const commonParams = new URLSearchParams({ min_matches: "10", game_mode: "normal", min_unix_timestamp: String(Math.floor(Date.now() / 1000) - dataWindow * 86400) });
+      const playerRank = ownAccountId == null ? null : playerProfiles[ownAccountId]?.estimatedRankNumber ?? null;
+      const cohort = rankCohort(playerRank);
+      if (cohort) { commonParams.set("min_average_badge", String(cohort.min)); commonParams.set("max_average_badge", String(cohort.max)); }
       if (queueMode !== "all") commonParams.set("match_mode", queueMode);
       const common = commonParams.toString();
       const matchupParams = new URLSearchParams(commonParams); matchupParams.set("same_lane_filter", String(laneOnly));
@@ -723,7 +738,12 @@ export default function Home() {
         console.warn(`Deadlock API ${label} unavailable; recommendations will use remaining evidence.`, result.reason);
         return fallback;
       };
-      const baseStats = unwrap(responses[0], "hero item stats", [] as ItemStat[]);
+      let baseStats = unwrap(responses[0], "hero item stats", [] as ItemStat[]);
+      if (cohort && !rankDataHasCoverage(baseStats.map((stat) => stat.matches))) {
+        const broadParams = new URLSearchParams(commonParams);
+        broadParams.delete("min_average_badge"); broadParams.delete("max_average_badge");
+        baseStats = await cachedJson<ItemStat[]>(itemStatsUrl(heroId, broadParams)).catch(() => baseStats);
+      }
       const teamStats = unwrap(responses[1], "exact enemy lineup item stats", [] as ItemStat[]);
       const carryStats = unwrap(responses[2], "focus enemy item stats", [] as ItemStat[]);
       const counterStats = unwrap(responses[3], "hero matchup stats", [] as CounterStat[]);
@@ -741,6 +761,9 @@ export default function Home() {
       if (runId !== analysisRunRef.current) return;
       setItemFlow(flowResult[0].status === "fulfilled" ? flowResult[0].value : null);
       if (flowResult[0].status === "rejected") console.warn("Optional Deadlock item-flow data unavailable; continuing with item and matchup statistics.", flowResult[0].reason);
+      if (runId !== analysisRunRef.current) return;
+      const abilityResults = await Promise.allSettled(enemyIds.map((enemyId) => cachedJson<HeroAbilityEvidence[]>(`${API}/assets/items/by-hero-id/${enemyId}?language=english`, 24 * 60 * 60 * 1000)));
+      const enemyThreatProfiles = new Map(enemyIds.map((enemyId, index) => [enemyId, mergedHeroThreats(enemyId, abilityResults[index].status === "fulfilled" ? abilityResults[index].value : [])]));
       if (runId !== analysisRunRef.current) return;
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
@@ -776,9 +799,10 @@ export default function Home() {
       });
       const currentThreats = scoreThreats(threatInputs, effectiveGameTimeSeconds);
       const weightedThreatProfile = currentThreats.reduce((all, threat) => {
-        Object.entries(threatsForHero(threat.heroId)).forEach(([tag, strength]) => { all[tag] = (all[tag] ?? 0) + (strength ?? 0) * threat.weight; });
+        Object.entries(enemyThreatProfiles.get(threat.heroId) ?? {}).forEach(([tag, strength]) => { all[tag] = (all[tag] ?? 0) + (strength ?? 0) * threat.weight; });
         return all;
       }, {} as Record<string, number>);
+      const personal = personalSignals(personalHeroProfile?.heroId === heroId && personalHeroProfile.accountId === ownAccountId ? personalHeroProfile : null);
       const ranked = rankItems(calculated.map((entry) => {
         const flow = flowResult[0].status === "fulfilled" ? flowResult[0].value : null;
         const core = flowCoreFit(flow, entry.item.id, itemFlowPhase(effectiveGameTimeSeconds));
@@ -796,26 +820,26 @@ export default function Home() {
           enemyRates: entry.enemyRates.map((rate) => ({ heroId: rate.heroId, rate: rate.rate, matches: rate.matches })),
         };
       }),
-        threatInputs, effectiveGameTimeSeconds);
+        threatInputs, effectiveGameTimeSeconds, personal);
       const rankedById = new Map(ranked.map((entry) => [entry.itemId, entry]));
       const carryThreats = threatInputs.filter((enemy) => enemy.heroId === carryId);
       const carryRanked = rankItems(calculated.map((entry) => {
         const core = flowCoreFit(flowResult[0].status === "fulfilled" ? flowResult[0].value : null, entry.item.id, itemFlowPhase(effectiveGameTimeSeconds));
         return { itemId: entry.item.id, baselineRate: entry.baselineRate, coreRate: core?.rate ?? null, coreMatches: core?.matches ?? 0,
           exactRate: null, exactMatches: 0, averageBuyTimeSeconds: entry.carryBuyTime || null,
-          mechanicFit: Math.max(counterCapability(entry.item.class_name, threatsForHero(carryId)), tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected }) ? 0.72 : 0),
+          mechanicFit: Math.max(counterCapability(entry.item.class_name, enemyThreatProfiles.get(carryId) ?? {}), tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected }) ? 0.72 : 0),
           preferenceFit: buildStyle === "safe" && entry.item.item_slot_type === "vitality" ? 1 : buildStyle === "greedy" && (entry.item.cost ?? 0) >= 3200 ? 1 : 0,
           enemyRates: entry.enemyRates.filter((rate) => rate.heroId === carryId).map(({ heroId, rate, matches }) => ({ heroId, rate, matches })) };
-      }), carryThreats, effectiveGameTimeSeconds);
+      }), carryThreats, effectiveGameTimeSeconds, personal);
       const carryRankedById = new Map(carryRanked.map((entry) => [entry.itemId, entry]));
-      setRecommendations(calculated.map((entry) => { const scored = rankedById.get(entry.item.id); const carryScored = carryRankedById.get(entry.item.id); const advisorReason = scored?.reason.replace(/Hero #(\d+)/g, (_match, id: string) => heroMap.get(Number(id))?.name ?? `Hero #${id}`); return { ...entry, carryScore: carryScored?.score ?? 0, teamScore: scored?.score ?? 0, advisorReason, coreFit: scored?.coreFit, counterFit: scored?.counterFit, counterUrgency: scored?.counterUrgency, mechanicFit: scored?.mechanicFit, exactFit: scored?.exactFit, threatTargets: scored?.threatTargets }; }));
+      if (calculated.length) setRecommendations(calculated.map((entry) => { const scored = rankedById.get(entry.item.id); const carryScored = carryRankedById.get(entry.item.id); const selectedScore = buyTarget === "team" ? scored : carryScored; const advisorReason = selectedScore?.reason.replace(/Hero #(\d+)/g, (_match, id: string) => heroMap.get(Number(id))?.name ?? `Hero #${id}`); return { ...entry, carryScore: carryScored?.score ?? 0, teamScore: scored?.score ?? 0, advisorReason, coreFit: selectedScore?.coreFit, counterFit: selectedScore?.counterFit, counterUrgency: selectedScore?.counterUrgency, mechanicFit: selectedScore?.mechanicFit, exactFit: selectedScore?.exactFit, personalFit: selectedScore?.personalFit, threatTargets: selectedScore?.threatTargets }; }));
       setAllCounterStats(counterStats);
       setLaneCounterStats(laneStats);
       setMatchup(counterStats.find((stat) => stat.hero_id === heroId && stat.enemy_hero_id === carryId) ?? null);
       setUpdatedAt(new Date());
     } catch (error) { console.warn("Counterlock analysis failed; inspect Deadlock API responses and match inputs.", error); if (runId === analysisRunRef.current) setError(copy[lang].statsError); }
     finally { if (runId === analysisRunRef.current) setLoading(false); }
-  }, [buildStyle, carryId, dataWindow, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, enemyIds, heroId, heroMap, items, laneOnly, lang, lifestealDetected, matchState, playerProfiles, queueMode, threats]);
+  }, [buildStyle, buyTarget, carryId, dataWindow, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, enemyIds, heroId, heroMap, items, laneOnly, lang, lifestealDetected, matchState, ownAccountId, personalHeroProfile, playerProfiles, queueMode, threats]);
 
   useEffect(() => {
     if (!desktopAvailable()) return;
@@ -832,34 +856,38 @@ export default function Home() {
 
   function updateContext(action: () => void) { action(); setSortMode("recommended"); }
 
-  const visibleRecommendations = useMemo(() => {
-    const [start, end] = phaseRanges[phase];
-    const values = (entry: Recommendation) => buyTarget === "team" ? { rate: entry.teamRate, matches: entry.teamMatches, buyTime: entry.teamBuyTime, score: entry.teamScore } : { rate: entry.carryRate, matches: entry.carryMatches, buyTime: entry.carryBuyTime, score: entry.carryScore };
-    const filtered = recommendations.filter((entry) => { const value = values(entry); return value.buyTime >= start && value.buyTime <= end && value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
-    return filtered.sort((a, b) => { const av = values(a), bv = values(b); return sortMode === "buytime" ? av.buyTime - bv.buyTime : sortMode === "winrate" ? bv.rate - av.rate : sortMode === "sample" ? bv.matches - av.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : bv.score - av.score; }).slice(0, resultCount);
-  }, [buyTarget, category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
-
   const allOwnedItemIds = useMemo(() => Array.from(new Set([
     ...ownedItemIds,
     ...(desktopStatus?.in_game && desktopAdvice?.inventory_known && desktopAdvice.match_id === desktopLiveMatch?.match_id ? desktopOwnedItemIds : []),
   ])), [desktopAdvice?.inventory_known, desktopAdvice?.match_id, desktopLiveMatch?.match_id, desktopOwnedItemIds, desktopStatus?.in_game, ownedItemIds]);
+  const ownedItemClasses = useMemo(() => new Set(items.filter((item) => allOwnedItemIds.includes(item.id) && item.class_name).map((item) => item.class_name!)), [allOwnedItemIds, items]);
+  const buildRecommendations = useMemo(() => recommendations.filter((entry) => !hasCounterRoleOverlap(entry.item.class_name, ownedItemClasses)), [ownedItemClasses, recommendations]);
+
+  const visibleRecommendations = useMemo(() => {
+    const [start, end] = phaseRanges[phase];
+    const values = (entry: Recommendation) => buyTarget === "team" ? { rate: entry.teamRate, matches: entry.teamMatches, buyTime: entry.teamBuyTime, score: entry.teamScore } : { rate: entry.carryRate, matches: entry.carryMatches, buyTime: entry.carryBuyTime, score: entry.carryScore };
+    const filtered = buildRecommendations.filter((entry) => { const value = values(entry); return value.buyTime >= start && value.buyTime <= end && value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
+    return filtered.sort((a, b) => { const av = values(a), bv = values(b); return sortMode === "buytime" ? av.buyTime - bv.buyTime : sortMode === "winrate" ? bv.rate - av.rate : sortMode === "sample" ? bv.matches - av.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : bv.score - av.score; }).slice(0, resultCount);
+  }, [buildRecommendations, buyTarget, category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, resultCount, sortMode]);
 
   const fullBuildPlan = useMemo(() => {
     const values = (entry: Recommendation) => buyTarget === "team" ? { rate: entry.teamRate, matches: entry.teamMatches, buyTime: entry.teamBuyTime, score: entry.teamScore } : { rate: entry.carryRate, matches: entry.carryMatches, buyTime: entry.carryBuyTime, score: entry.carryScore };
     // Build planning is independent of the user's presentation filters.
-    const pool = recommendations;
+    const pool = buildRecommendations;
     const itemComponents = buildUpgradeGraph(items);
     const allowedIds = new Set(pool.map((entry) => entry.item.id));
-    const planningCandidates: PlanCandidate[] = recommendations.map((entry) => ({ itemId: entry.item.id, score: values(entry).score,
+    const planningCandidates: PlanCandidate[] = buildRecommendations.map((entry) => ({ itemId: entry.item.id, score: values(entry).score,
       buyTime: values(entry).buyTime || null, tier: entry.item.item_tier, cost: entry.item.cost, category: entry.item.item_slot_type,
       counterUrgency: entry.counterUrgency ?? 0, coreFit: entry.coreFit ?? 0,
       mechanicFit: entry.mechanicFit ?? 0, components: itemComponents.get(entry.item.id) ?? [], owned: allOwnedItemIds.includes(entry.item.id) }));
     const flow = bestFlowPath(itemFlow, 4);
     const flowSet = new Set(flow);
+    const normalCoreNextId = flow.find((id) => !allOwnedItemIds.includes(id)) ?? null;
     const pathCandidates = planningCandidates.filter((entry) => allowedIds.has(entry.itemId));
     const own = desktopStatus?.in_game && desktopLiveMatch ? desktopLiveMatch.players.find((player) => player.account_id != null && player.account_id === desktopLiveMatch.account_id) : null;
     const liveSouls = own?.unspent_souls ?? null;
-    const nextBuyOrder = rankNextBuys(pathCandidates.map((entry) => ({ ...entry, pathSynergy: flowSet.has(entry.itemId) ? 0.08 : 0, timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - effectiveGameTimeSeconds) / 900), affordabilityUtility: entry.cost == null || liveSouls == null ? 0 : liveSouls >= entry.cost ? 1 : -Math.min(1, (entry.cost - liveSouls) / 5000), opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 })));
+    const activePersonalProfile = personalHeroProfile?.heroId === heroId && personalHeroProfile.accountId === ownAccountId ? personalHeroProfile : null;
+    const nextBuyOrder = rankNextBuys(pathCandidates.map((entry) => ({ ...entry, pathSynergy: Math.max(flowSet.has(entry.itemId) ? 0.08 : 0, personalSequencePrior(activePersonalProfile, allOwnedItemIds, entry.itemId)), timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - effectiveGameTimeSeconds) / 900), affordabilityUtility: entry.cost == null || liveSouls == null ? 0 : liveSouls >= entry.cost ? 1 : -Math.min(1, (entry.cost - liveSouls) / 5000), deviationCost: entry.itemId === normalCoreNextId ? 0 : flowSet.has(entry.itemId) ? 0.015 : 0.04, opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 })));
     const nextBuyScores = new Map(nextBuyOrder.map((entry) => [entry.itemId, entry.nextBuyScore]));
     const pathIds = planPurchasePath(pathCandidates, itemFlow, 16);
     const priorityIds = [...new Set([...nextBuyOrder.slice(0, 1).map((entry) => entry.itemId), ...pathIds])].slice(0, 16);
@@ -867,32 +895,56 @@ export default function Home() {
     const early = purchaseOrder.filter((entry) => values(entry).buyTime < 720 || (entry.item.item_tier ?? 0) === 1);
     const mid = purchaseOrder.filter((entry) => !early.includes(entry) && (values(entry).buyTime < 1260 || (entry.item.item_tier ?? 0) === 2));
     const late = purchaseOrder.filter((entry) => !early.includes(entry) && !mid.includes(entry));
-    const entriesById = new Map(recommendations.map((entry) => [entry.item.id, entry]));
+    const entriesById = new Map(pool.map((entry) => [entry.item.id, entry]));
     // Final inventory includes confirmed manual ownership; future purchases do not.
     const decisions = findSellDecisions(planningCandidates, purchaseOrder.map((entry) => entry.item.id));
     const explicitlyReplaced = new Set(decisions.map((decision) => decision.sellId));
-    const slots = optimizeSlots(recommendations.flatMap((entry) => entry.item.item_slot_type ? [{ id: entry.item.id, category: entry.item.item_slot_type, score: values(entry).score, components: itemComponents.get(entry.item.id) }] : []), 4, 4, allOwnedItemIds.filter((id) => !explicitlyReplaced.has(id)));
+    const slots = optimizeSlots(pool.flatMap((entry) => entry.item.item_slot_type ? [{ id: entry.item.id, category: entry.item.item_slot_type, score: values(entry).score, components: itemComponents.get(entry.item.id) }] : []), 4, 4, allOwnedItemIds.filter((id) => !explicitlyReplaced.has(id)));
     const weapon = slots.fixed.filter((slot) => slot.category === "weapon").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
     const vitality = slots.fixed.filter((slot) => slot.category === "vitality").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
     const spirit = slots.fixed.filter((slot) => slot.category === "spirit").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
     const flex = slots.flex.map((slot) => entriesById.get(slot.id)!).filter(Boolean);
-    const sellSuggestions = decisions.flatMap((decision) => { const sell = recommendations.find((entry) => entry.item.id === decision.sellId); const replacement = recommendations.find((entry) => entry.item.id === decision.replacementId); return sell && replacement ? [{ sell, replacement, reason: decision.reason }] : []; }).slice(0, 3);
+    const sellSuggestions = decisions.flatMap((decision) => { const sell = pool.find((entry) => entry.item.id === decision.sellId); const replacement = pool.find((entry) => entry.item.id === decision.replacementId); return sell && replacement ? [{ sell, replacement, reason: decision.reason }] : []; }).slice(0, 3);
     const adaptiveCounters = purchaseOrder.filter((entry) => (entry.mechanicFit ?? 0) > 0 || (entry.counterFit ?? 0) >= 0.012).slice(0, 5);
     const adaptiveIds = new Set(adaptiveCounters.map((entry) => entry.item.id));
     const corePath = purchaseOrder.filter((entry) => !adaptiveIds.has(entry.item.id)).slice(0, 6);
-    const situational = recommendations.filter((entry) => tagsForItem(entry.item.class_name).length > 0 && !(entry.mechanicFit ?? 0) && !tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected })).slice(0, 4);
+    const situational = pool.filter((entry) => tagsForItem(entry.item.class_name).length > 0 && !(entry.mechanicFit ?? 0) && !tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected })).slice(0, 4);
     return { early, mid, late, weapon, vitality, spirit, flex, purchaseOrder, corePath, adaptiveCounters, situational, sellSuggestions, values,
-      nextBuyOrder: nextBuyOrder.map((entry) => ({ itemId: entry.itemId, nextBuyScore: entry.nextBuyScore })), nextBuyScores };
-  }, [allOwnedItemIds, buildStyle, buyTarget, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, itemFlow, items, lifestealDetected, recommendations, threats]);
+      normalCoreNextId, nextBuyOrder: nextBuyOrder.map((entry) => ({ itemId: entry.itemId, nextBuyScore: entry.nextBuyScore })), nextBuyScores };
+  }, [allOwnedItemIds, buildRecommendations, buildStyle, buyTarget, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, heroId, itemFlow, items, lifestealDetected, ownAccountId, personalHeroProfile, threats]);
 
   useEffect(() => {
-    if (!desktopAvailable() || !recommendations.length || !heroId || !enemyIds.length) return;
+    if (!desktopAvailable() || !buildRecommendations.length || !heroId || !enemyIds.length) return;
     const nextBuyScores = new Map(fullBuildPlan.nextBuyOrder.map((entry) => [entry.itemId, entry.nextBuyScore]));
-    void setAdvisorEvidence({ hero_id: heroId, enemy_ids: enemyIds, item_catalog: items.filter((item) => item.class_name && item.item_slot_type && item.cost != null).map((item) => ({ item_id: item.id, class_name: item.class_name! })), items: recommendations.filter((entry) => entry.item.cost != null && !allOwnedItemIds.includes(entry.item.id)).map((entry) => ({
+    void setAdvisorEvidence({ hero_id: heroId, enemy_ids: enemyIds, item_catalog: items.filter((item) => item.class_name && item.item_slot_type && item.cost != null).map((item) => ({ item_id: item.id, class_name: item.class_name! })), items: buildRecommendations.filter((entry) => entry.item.cost != null && !allOwnedItemIds.includes(entry.item.id)).map((entry) => ({
       item_id: entry.item.id, name: entry.item.name, cost: entry.item.cost!, score: nextBuyScores.get(entry.item.id) ?? entry.teamScore,
       reason: entry.advisorReason ?? "Weighted individual matchups and hero baseline.",
     })) });
-  }, [recommendations, heroId, enemyIds, allOwnedItemIds, fullBuildPlan, items]);
+  }, [buildRecommendations, heroId, enemyIds, allOwnedItemIds, fullBuildPlan, items]);
+
+  useEffect(() => {
+    const match = desktopLiveMatch;
+    if (!desktopStatus?.in_game || !match?.match_id || !match.account_id || !match.game_time_s || !heroId || typeof window === "undefined") return;
+    const choices = fullBuildPlan.nextBuyOrder.slice(0, 3).map((entry) => ({ itemId: entry.itemId, score: entry.nextBuyScore }));
+    if (choices.length) recordRecommendationSnapshot(match.account_id, match.match_id, heroId, match.game_time_s, choices, window.localStorage);
+  }, [desktopLiveMatch, desktopStatus?.in_game, fullBuildPlan.nextBuyOrder, heroId]);
+
+  useEffect(() => {
+    const matchId = desktopLastMatch?.match_id;
+    const accountId = desktopLastMatch?.account_id ?? savedSteamProfile?.account_id ?? null;
+    if (!matchId || !accountId || desktopStatus?.in_game || typeof window === "undefined") return;
+    const cache = recommendationOutcomeCache(accountId, window.localStorage);
+    if (cache.completed[matchId] || !cache.pending[matchId]) return;
+    let active = true;
+    void fetch("/api/statlocker/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([matchId]) })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload: unknown) => {
+        if (!active || !payload || typeof payload !== "object" || !Array.isArray((payload as Record<string, unknown>).matches)) return;
+        const detail = (payload as { matches: unknown[] }).matches.find((entry) => entry && typeof entry === "object" && ((entry as Record<string, unknown>).matchId ?? (entry as Record<string, unknown>).match_id) === matchId);
+        if (detail) completeRecommendationOutcome(accountId, detail, window.localStorage);
+      }).catch((error) => console.warn("Recommendation outcome sync is deferred; saved recommendations remain local.", error));
+    return () => { active = false; };
+  }, [desktopLastMatch?.match_id, desktopLastMatch?.account_id, desktopStatus?.in_game, savedSteamProfile?.account_id]);
 
   const counterPicks = useMemo<CounterPick[]>(() => {
     if (!allCounterStats.length || !enemyIds.length) return [];
@@ -917,9 +969,10 @@ export default function Home() {
   }, [allCounterStats, carryId, enemyIds, heroes]);
   const liveAdviceForMatch = desktopAdvice?.match_id === desktopLiveMatch?.match_id ? desktopAdvice : null;
   const localLiveNextBuyId = fullBuildPlan.nextBuyOrder.find((entry) => !allOwnedItemIds.includes(entry.itemId))?.itemId;
+  const normalCoreNext = recommendations.find((entry) => entry.item.id === fullBuildPlan.normalCoreNextId) ?? null;
   const nextBuy = desktopStatus?.in_game
-    ? recommendations.find((entry) => entry.item.id === liveAdviceForMatch?.recommended?.item_id && !allOwnedItemIds.includes(entry.item.id))
-      ?? recommendations.find((entry) => entry.item.id === localLiveNextBuyId && !allOwnedItemIds.includes(entry.item.id))
+    ? buildRecommendations.find((entry) => entry.item.id === liveAdviceForMatch?.recommended?.item_id && !allOwnedItemIds.includes(entry.item.id))
+      ?? buildRecommendations.find((entry) => entry.item.id === localLiveNextBuyId && !allOwnedItemIds.includes(entry.item.id))
     : visibleRecommendations.find((entry) => !allOwnedItemIds.includes(entry.item.id));
   const liveAdvice = desktopStatus?.in_game ? liveAdviceForMatch?.recommended : null;
   const activeAlerts = [lifestealDetected ? t.lifestealDetected : null, threats.healing ? t.alertHealing : null, threats.weapon ? t.alertWeapon : null, threats.spirit ? t.alertSpirit : null, threats.crowdControl ? t.alertCrowdControl : null].filter((alert): alert is NonNullable<typeof alert> => alert !== null);
@@ -1204,24 +1257,25 @@ export default function Home() {
   }, [allyTeamIds, enemyIds, laneAssignments, laneCounterStats]);
   return (
     <main className={desktopStatus ? "desktop-shell" : undefined}>
-      <header className="site-header">
-        <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></a>
+      {desktopStatus && <aside className="desktop-sidebar"><a className="desktop-brand" href="#top"><span>CL</span><b>COUNTERLOCK</b></a><nav aria-label="Desktop navigation">{(["match", "build", "system"] as const).map((tab) => <button key={tab} type="button" className={desktopTab === tab ? "active" : ""} aria-current={desktopTab === tab ? "page" : undefined} onClick={() => setDesktopTab(tab)}><i>{tab === "match" ? "◉" : tab === "build" ? "◇" : "⚙"}</i>{tab === "match" ? "Current Match" : tab === "build" ? "Build Lab" : "Settings"}</button>)}</nav><div className="desktop-sidebar-status"><b>DEADLOCK</b><span><i />{desktopStatus.game_running ? "Connected" : "Waiting"}</span><small>v0.1.4</small></div></aside>}
+      <div className={desktopStatus ? "desktop-workspace" : undefined}>
+      <header className={desktopStatus ? "desktop-topbar" : "site-header"}>
+        {!desktopStatus && <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></a>}
+        {desktopStatus && <div className="desktop-context-title"><small>{desktopStatus.in_game ? "LIVE MATCH" : "DEADLOCK COMPANION"}</small><strong>{desktopStatus.in_game && desktopLiveMatch?.game_time_s != null ? `${Math.floor(desktopLiveMatch.game_time_s / 60)}:${String(desktopLiveMatch.game_time_s % 60).padStart(2, "0")}` : desktopStatus.game_running ? "Waiting for match" : "Ready"}</strong></div>}
         <div className="header-actions">
-          <div className={`live-pill companion-${companionStatus}`}><span /> {companionStatus === "connected" ? t.companionConnected : companionStatus === "waiting" ? t.companionSearching : t.companionUnavailable}</div>
-          {desktopAvailable() && <button className="header-button" type="button" onClick={() => setDesktopTab("system")}>{lang === "de" ? "EINSTELLUNGEN" : "SETTINGS"}</button>}
-          <button className="header-button patch-button" type="button" onClick={() => void showLatestPatch()}>{t.latestPatch}</button>
-          <button className="header-button theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-pressed={darkMode}>{darkMode ? `☾ ${t.darkMode}` : `☀ ${t.lightMode}`}</button>
-          <div className="language-toggle" aria-label="Language / Sprache">
+          {!desktopStatus && <div className={`live-pill companion-${companionStatus}`}><span /> {companionStatus === "connected" ? t.companionConnected : companionStatus === "waiting" ? t.companionSearching : t.companionUnavailable}</div>}
+          {!desktopStatus && <button className="header-button patch-button" type="button" onClick={() => void showLatestPatch()}>{t.latestPatch}</button>}
+          {!desktopStatus && <button className="header-button theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-pressed={darkMode}>{darkMode ? `☾ ${t.darkMode}` : `☀ ${t.lightMode}`}</button>}
+          <div className="language-toggle" aria-label="Language / Sprache" style={desktopStatus ? { display: "none" } : undefined}>
             <button className={lang === "en" ? "active" : ""} onClick={() => setLang("en")}>EN</button>
             <button className={lang === "de" ? "active" : ""} onClick={() => setLang("de")}>DE</button>
           </div>
         </div>
       </header>
-      {desktopStatus && <nav className="desktop-tabs" aria-label="Desktop views">{(["match", "build", "system"] as const).map((tab) => <button key={tab} type="button" className={desktopTab === tab ? "active" : ""} aria-current={desktopTab === tab ? "page" : undefined} onClick={() => setDesktopTab(tab)}>{tab === "match" ? "CURRENT MATCH" : tab === "build" ? "BUILD LAB" : "SYSTEM"}</button>)}</nav>}
-      {patchOpen && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
+      {patchOpen && !desktopStatus && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
 
-      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} profiles={playerProfiles} advice={desktopAdvice} onOpenBuild={() => setDesktopTab("build")} />}
-      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} profiles={playerProfiles} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={liveAdviceForMatch} recommendations={recommendations} />}
+      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} profiles={playerProfiles} advice={desktopAdvice} recommendations={buildRecommendations} onOpenBuild={() => setDesktopTab("build")} />}
+      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} profiles={playerProfiles} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={liveAdviceForMatch} recommendations={buildRecommendations} />}
       {desktopStatus && desktopTab === "system" && <section className="desktop-system-page" aria-label="System diagnostics"><div className="desktop-system-heading"><small>COUNTERLOCK / SYSTEM</small><h1>System & diagnostics</h1><p>Runtime details and local desktop preferences.</p></div><div className="desktop-system-grid">
         <article><h2>Game connection</h2><dl><div><dt>Deadlock</dt><dd>{desktopStatus.game_running ? "Running" : "Not running"}</dd></div><div><dt>Process ID</dt><dd>{desktopStatus.pid ?? "—"}</dd></div><div><dt>Steam build</dt><dd>{desktopStatus.build_id ?? "Unknown"}</dd></div><div><dt>Live source</dt><dd>{desktopStatus.provider}</dd></div><div><dt>Console phase</dt><dd>{desktopStatus.console_phase ?? "No verified event"}</dd></div><div><dt>Match ID</dt><dd>{desktopStatus.match_id ?? "Unavailable"}</dd></div><div><dt>Inventory</dt><dd>{desktopStatus.capabilities.items ? "Available" : "Not available"}</dd></div><div><dt>Install path</dt><dd>{desktopStatus.installation_path ?? "Not detected"}</dd></div></dl>{desktopStatus.last_error && <p className="desktop-system-error">{desktopStatus.last_error}</p>}{desktopLastMatch && <p className="desktop-system-note">Last match: {desktopLastMatch.match_id ?? "ID unknown"} · {desktopLastMatch.source}</p>}</article>
         <article><h2>Desktop settings</h2><label><input type="checkbox" checked={desktopPreferences?.close_to_tray ?? true} onChange={(event) => void updateDesktopPreferences({ close_to_tray: event.target.checked })} />{lang === "de" ? "Beim Schließen im Tray weiterlaufen" : "Keep running in tray when closing"}</label><label><input type="checkbox" checked={desktopPreferences?.compact_always_on_top ?? true} onChange={(event) => void updateDesktopPreferences({ compact_always_on_top: event.target.checked })} />{lang === "de" ? "Kompaktfenster immer im Vordergrund" : "Keep compact window always on top"}</label><p>Game memory is read locally. Screenshots and unspent shop balance are separate capabilities.</p><hr /><h2>{lang === "de" ? "Software-Updates" : "Software updates"}</h2><button type="button" disabled={updateBusy} onClick={() => void checkDesktopUpdates()}>{updateBusy ? (lang === "de" ? "BITTE WARTEN …" : "PLEASE WAIT…") : (lang === "de" ? "NACH UPDATES SUCHEN" : "CHECK FOR UPDATES")}</button>{updateStatus && <p role="status">{updateStatus}</p>}</article>
@@ -1303,7 +1357,7 @@ export default function Home() {
         <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {buyTarget === "team" ? t.enemyLineup : carryHero?.name}</span></h2></div><div className="result-controls"><div className="buy-target-switch" aria-label={t.buyTarget}><small>{t.buyTarget}</small><div><button className={buyTarget === "carry" ? "active" : ""} type="button" onClick={() => setBuyTarget("carry")}>{t.vsCarryMode}</button><button className={buyTarget === "team" ? "active" : ""} type="button" onClick={() => setBuyTarget("team")}>{t.vsTeamMode}</button></div></div><div className="result-actions"><button className={`copy-build full-build-trigger ${showFullBuild ? "active" : ""}`} type="button" onClick={() => setShowFullBuild((current) => !current)}>{showFullBuild ? t.hideFullBuild : t.showFullBuild}</button><button className="copy-build" onClick={shareMatchup}>{linkCopied ? t.linkCopied : t.share}</button><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div></div></div>
 
         <section className="in-match-tools">
-          <article className="next-buy-card">{nextBuy ? <><div className="next-buy-icon">{nextBuy.item.shop_image_webp ? <img src={nextBuy.item.shop_image_webp} alt="" /> : "◆"}</div><div><small>{t.nextBuy}</small><strong>{nextBuy.item.name}</strong><p>{liveAdvice?.reason ?? t.nextBuyText} · ◈ {nextBuy.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</p><b className={(nextBuy.item.cost ?? 0) <= souls ? "buy-ready" : "buy-saving"}>{desktopSoulsKnown === false || (liveAdvice && liveAdvice.affordable == null) ? "Live souls unavailable" : (nextBuy.item.cost ?? 0) <= souls ? t.affordable : `${t.needSouls}: ◈ ${((nextBuy.item.cost ?? 0) - souls).toLocaleString(lang === "de" ? "de-DE" : "en-US")}`}</b></div></> : <><div className="next-buy-icon">◆</div><div><small>{t.nextBuy}</small><strong>—</strong><p>{desktopStatus?.in_game ? "Awaiting verified match recommendation" : ownedItemIds.length ? t.duplicatePlan : ""}</p></div></>}</article>
+          <article className="next-buy-card">{nextBuy ? <><div className="next-buy-icon">{nextBuy.item.shop_image_webp ? <img src={nextBuy.item.shop_image_webp} alt="" /> : "◆"}</div><div><small>{t.nextBuy}</small><strong>{nextBuy.item.name}</strong><p>{liveAdvice?.reason ?? t.nextBuyText} · ◈ {nextBuy.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</p>{personalHeroProfile?.heroId === heroId && personalHeroProfile.accountId === ownAccountId && <small>PERSONAL FIT · {personalHeroProfile.matches} {heroMap.get(heroId)?.name ?? "hero"} matches · {personalHeroProfile.itemStats.find((item) => item.itemId === nextBuy.item.id)?.matches ?? 0} matches with this item</small>}{normalCoreNext && normalCoreNext.item.id !== nextBuy.item.id && <small>NORMAL CORE BUY · {normalCoreNext.item.name} · delayed by one purchase</small>}<b className={(nextBuy.item.cost ?? 0) <= souls ? "buy-ready" : "buy-saving"}>{desktopSoulsKnown === false || (liveAdvice && liveAdvice.affordable == null) ? "Live souls unavailable" : (nextBuy.item.cost ?? 0) <= souls ? t.affordable : `${t.needSouls}: ◈ ${((nextBuy.item.cost ?? 0) - souls).toLocaleString(lang === "de" ? "de-DE" : "en-US")}`}</b></div></> : <><div className="next-buy-icon">◆</div><div><small>{t.nextBuy}</small><strong>—</strong><p>{desktopStatus?.in_game ? "Awaiting verified match recommendation" : ownedItemIds.length ? t.duplicatePlan : ""}</p></div></>}</article>
           {desktopStatus?.in_game && Boolean(desktopAdvice?.alternatives.length) && <div className="desktop-advice-alternatives"><small>{lang === "de" ? "ALTERNATIVEN" : "ALTERNATIVES"}</small>{desktopAdvice?.alternatives.map((item) => <span key={item.item_id}>{item.name} · ◈ {item.cost.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</span>)}</div>}
           <div className="context-controls"><div><small>{t.matchState}</small><div className="segmented">{(["ahead", "even", "behind"] as const).map((state) => <button className={matchState === state ? "active" : ""} type="button" key={state} onClick={() => updateContext(() => setMatchState(state))}>{t[state]}</button>)}</div></div><div><small>{t.buildPath}</small><div className="segmented">{(["balanced", "safe", "greedy"] as const).map((style) => <button className={buildStyle === style ? "active" : ""} type="button" key={style} onClick={() => updateContext(() => setBuildStyle(style))}>{t[style]}</button>)}</div></div></div>
           <div className="threat-controls"><small>{t.threats}</small><div>{(["healing", "weapon", "spirit", "crowdControl"] as const).map((threat) => <button className={threats[threat] ? "active" : ""} type="button" key={threat} onClick={() => updateContext(() => setThreats((current) => ({ ...current, [threat]: !current[threat] })))}>{t[threat === "weapon" ? "weaponDamage" : threat === "spirit" ? "spiritDamage" : threat]}</button>)}</div><label className="souls-input"><span>{t.souls}</span><input type="number" min="0" value={souls || ""} onChange={(event) => setSouls(Math.max(0, Number(event.target.value)))} placeholder="0" /></label></div>
@@ -1418,6 +1472,7 @@ export default function Home() {
           {screenshotUrl && <div className="import-actions"><label className="rescan-button"><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readScreenshot(file); }} />{t.scanAgain}</label><button type="button" onClick={importDetectedHeroes} disabled={!selectedDetections.length || ocrRunning || (importTarget === "auto" && !detections.some((entry) => entry.isOwn))}>{importTarget === "auto" ? t.autoImport : importTarget === "ally" ? t.applyAllies : t.importHeroes} ({selectedDetections.length}/{importTarget === "auto" ? 12 : importTarget === "ally" ? 5 : 6}) →</button></div>}
         </div>
       </div>}
+      </div>
     </main>
   );
 }

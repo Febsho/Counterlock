@@ -58,7 +58,7 @@ Updater signing is required. A keypair has been created at
 configuration. With GitHub CLI installed and authenticated, you can set it with
 `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/counterlock.key`. Then
 create a version tag matching `src-tauri/tauri.conf.json`, for example
-`v0.1.3`. If you password-protect the key, also add
+`v0.1.4`. If you password-protect the key, also add
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 Desktop live-match detection uses the running game and its local `console.log`,
@@ -132,15 +132,18 @@ from the pawn ability list and resolved against the current item catalog; manual
 ownership marks remain available as an override. Total net worth is never used
 as shop balance.
 
-The optional Statlocker profile lookup uses only the documented batch profiles
+The optional Statlocker profile lookup uses the documented batch profiles
 endpoint, through `/api/statlocker/profiles`. Configure `STATLOCKER_API_KEY` in
-the server environment to enable it; the proxy strips the response to account ID
-and PP score and never accepts or returns a key. Its PP score is a small threat
-prior, below live net worth, souls/min and K/D/A. Missing configuration,
-authorization failures and rate limits leave Deadlock API recommendations
-working normally. Static GitHub Pages and the bundled desktop app do not host a
-server route, so profile lookup remains unavailable there unless the app is
-paired with a configured API host. When used, the UI attributes Statlocker.
+the server environment to enable it; the proxy only returns account ID, player
+name, avatar URL, PP score, estimated rank and region, and never accepts or
+returns a key. Profile results are cached by account ID for 15 minutes. PP is a
+small threat prior, below live net worth, souls/min and K/D/A. Missing
+configuration, authorization failures and rate limits leave Deadlock API
+recommendations working normally. Static GitHub Pages and the bundled desktop
+app do not host a server route. To use profiles there, build with
+`NEXT_PUBLIC_COUNTERLOCK_API_ORIGIN` set to a trusted HTTPS deployment that
+provides this route, and configure the secret only on that server. When used,
+the UI labels rank as a Statlocker estimate.
 Match-salt ingestion is a separate desktop flow and does not require this
 profile API key.
 

@@ -3,7 +3,8 @@ import { scoreThreats, type ThreatPlayer } from "./threat-score.ts";
 
 export type EnemyEvidence = { heroId: number; rate: number; matches: number };
 export type ItemEvidence = { itemId: number; baselineRate: number; coreRate?: number | null; coreMatches?: number; exactRate: number | null; exactMatches: number; mechanicFit?: number; preferenceFit?: number; averageBuyTimeSeconds?: number | null; enemyRates: EnemyEvidence[] };
-export type RankedItem = ItemEvidence & { score: number; coreFit: number; counterFit: number; counterUrgency: number; exactFit: number; timingFit: number; confidence: "limited" | "medium" | "high"; threatTargets: number[]; reason: string };
+export type PersonalItemSignal = { personalFit: number; matches: number; avgBuyTimeSeconds: number | null };
+export type RankedItem = ItemEvidence & { score: number; coreFit: number; counterFit: number; counterUrgency: number; exactFit: number; timingFit: number; personalFit: number; confidence: "limited" | "medium" | "high"; threatTargets: number[]; reason: string };
 
 export const COUNTER_SIGNAL_WEIGHTS = { matchup: 0.55, mechanics: 0.45, referenceLift: 0.05 } as const;
 export function normalizeCounterFit(lift: number): number {
@@ -13,7 +14,7 @@ export function normalizeCounterFit(lift: number): number {
 export const LINEUP_CONFIDENCE = { weakSamples: 100, strongSamples: 800 } as const;
 
 /** Core baseline stays meaningful; exact lineup only contributes after its sample clears a threshold. */
-export function rankItems(items: ItemEvidence[], threats: ThreatPlayer[], gameTimeSeconds: number | null): RankedItem[] {
+export function rankItems(items: ItemEvidence[], threats: ThreatPlayer[], gameTimeSeconds: number | null, personal: ReadonlyMap<number, PersonalItemSignal> = new Map()): RankedItem[] {
   const threatWeights = scoreThreats(threats, gameTimeSeconds);
   return items.map((item) => {
     const enemyEvidence = item.enemyRates.flatMap((e) => {
@@ -29,13 +30,16 @@ export function rankItems(items: ItemEvidence[], threats: ThreatPlayer[], gameTi
     const counterUrgency = normalizeCounterFit(counterFit) * COUNTER_SIGNAL_WEIGHTS.matchup + mechanicFit * COUNTER_SIGNAL_WEIGHTS.mechanics;
     const preferenceFit = Math.max(0, Math.min(1, item.preferenceFit ?? 0));
     const timingFit = item.averageBuyTimeSeconds == null || gameTimeSeconds == null ? 0.5 : 1 / (1 + Math.abs(item.averageBuyTimeSeconds - gameTimeSeconds) / 900);
-    const score = item.baselineRate * 0.34 + coreFit * 0.18 + counterUrgency * 0.23 + exactFit * 0.05 + preferenceFit * 0.12 + timingFit * 0.08;
+    const personalSignal = personal.get(item.itemId);
+    const personalConfidence = personalSignal ? Math.min(0.15, personalSignal.matches / (personalSignal.matches + 25) * 0.15) : 0;
+    const personalFit = personalSignal ? item.baselineRate * (1 - personalConfidence) + personalSignal.personalFit * personalConfidence : item.baselineRate;
+    const score = item.baselineRate * 0.28 + coreFit * 0.18 + counterUrgency * 0.23 + exactFit * 0.05 + preferenceFit * 0.12 + timingFit * 0.08 + personalFit * 0.06;
     const orderedEvidence = [...enemyEvidence].sort((a, b) => b.weight * b.lift - a.weight * a.lift);
     const targets = orderedEvidence.slice(0, 3).map((e) => e.heroId);
     const samples = Math.max(item.exactMatches, ...item.enemyRates.map((e) => e.matches), 0);
     const matchup = orderedEvidence[0];
     const matchupText = matchup ? `Best weighted matchup: Hero #${matchup.heroId}, ${((matchup.rate - item.baselineRate) * 100).toFixed(1)} pp raw lift across ${matchup.matches.toLocaleString()} matches.` : "No per-enemy item sample is available.";
-    return { ...item, score, coreFit, counterFit, counterUrgency, exactFit, timingFit, confidence: confidenceTier(samples), threatTargets: targets,
+    return { ...item, score, coreFit, counterFit, counterUrgency, exactFit, timingFit, personalFit, confidence: confidenceTier(samples), threatTargets: targets,
       reason: item.exactMatches >= LINEUP_CONFIDENCE.strongSamples ? `Exact selected lineup: ${item.exactMatches.toLocaleString()} matches. ${matchupText}` : `Using weighted individual matchups. ${matchupText} ${item.exactMatches ? `Exact lineup sample (${item.exactMatches}) is too small to dominate.` : "Exact lineup evidence unavailable."}` };
   }).sort((a, b) => b.score - a.score || a.itemId - b.itemId);
 }

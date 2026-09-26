@@ -11,6 +11,7 @@ export type DesktopPlayer = {
   deaths: number | null;
   assists: number | null;
   net_worth: number | null;
+  souls_per_minute?: number | null;
   unspent_souls: number | null;
   owned_item_class_tokens: number[] | null;
   items: number[] | null;

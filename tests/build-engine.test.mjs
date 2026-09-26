@@ -8,8 +8,10 @@ import { optimizeSlots } from "../app/lib/build-engine/slot-optimizer.ts";
 import { findSellDecisions, planPurchasePath, rankNextBuys } from "../app/lib/build-engine/planner.ts";
 import { tagsForItem, tagMatchesManualThreat } from "../app/lib/build-engine/counter-tags.ts";
 import { counterCapability } from "../app/lib/build-engine/counter-tags.ts";
-import { threatsForHero } from "../app/lib/build-engine/hero-threats.ts";
+import { mergedHeroThreats, threatsForHero, threatsFromAbilities } from "../app/lib/build-engine/hero-threats.ts";
 import { itemStatsUrl } from "../app/lib/data/deadlock-api.ts";
+import { buildPersonalHeroProfile, personalSequencePrior, personalSignals, rankCohort, rankDataHasCoverage } from "../app/lib/build-engine/personal-profile.ts";
+import { completeRecommendationOutcome, recommendationOutcomeCache, recordRecommendationSnapshot } from "../app/lib/data/recommendation-outcomes.ts";
 
 test("team matchup URL explicitly requires every selected enemy", () => {
   const url = new URL(itemStatsUrl(10, new URLSearchParams("game_mode=normal"), [20, 21, 22], true));
@@ -95,6 +97,14 @@ test("an urgent adaptive counter can overtake the core item as next buy", () => 
   assert.equal(ranked[0].id, "counter");
 });
 
+test("deviation cost keeps a low value counter behind the normal core buy", () => {
+  const ranked = rankNextBuys([
+    { id: "core", score: .55, coreFit: .4, counterUrgency: .02, deviationCost: 0 },
+    { id: "weak-counter", score: .53, coreFit: .05, counterUrgency: .15, deviationCost: .08 },
+  ]);
+  assert.equal(ranked[0].id, "core");
+});
+
 test("purchase planner keeps supported flow transitions and does not double-purchase owned nodes", () => {
   const candidates = [10, 20, 30].map((itemId) => ({ itemId, score: 0.5, buyTime: 600, tier: 1, cost: 1250, category: "vitality", counterUrgency: 0, coreFit: 0.5, mechanicFit: 0, components: [], owned: itemId === 20 }));
   const flow = { nodes: [10, 20, 30].map((item_id, column) => ({ item_id, column, matches: 100, adjusted_win_rate: 0.54, avg_net_worth_at_buy: 10000 })),
@@ -118,10 +128,104 @@ test("hero compatibility keeps mechanic counters focused on the threat they addr
   assert.ok(counterCapability("upgrade_debuff_reducer", threatsForHero(11)) > counterCapability("upgrade_debuff_reducer", threatsForHero(13)));
 });
 
+test("hero ability evidence derives explicit mechanics and keeps curated fallback", () => {
+  const parsed = threatsFromAbilities([
+    { description: { active: "Deals SpiritDamage and stuns enemies" }, behaviours: ["BARRIER", "CHANNEL"] },
+    { description: "Dash forward, then heal allies" },
+  ]);
+  assert.equal(parsed.spirit_damage, 0.8);
+  assert.equal(parsed.hard_cc, 0.8);
+  assert.equal(parsed.shields, 0.65);
+  assert.equal(parsed.channeling, 0.7);
+  assert.equal(parsed.mobility, 0.65);
+  assert.equal(parsed.healing, 0.65);
+  assert.equal(mergedHeroThreats(13, []).weapon_dps, threatsForHero(13).weapon_dps);
+  assert.equal(mergedHeroThreats(999, [{ description: "Deals bullet damage" }]).weapon_dps, 0.75);
+});
+
 test("individual enemy evidence remains useful when exact lineup evidence is absent", () => {
   const result = rankItems([{ itemId: 9, baselineRate: 0.5, exactRate: null, exactMatches: 0, enemyRates: [{ heroId: 11, rate: 0.56, matches: 2400 }] }], [{ heroId: 11 }], 900);
   assert.ok(result[0].counterFit > 0);
   assert.match(result[0].reason, /individual matchups/);
+});
+
+test("personal profile is hero-specific, bounded, and turns match purchases into item and path priors", () => {
+  const matches = [
+    { matchId: 9, heroId: 10, won: true, gameDurationSeconds: 1800, items: [{ itemId: 1, gameTimeSeconds: 100 }, { itemId: 2, gameTimeSeconds: 300 }], kda: 4, spm: 900, damagePerMinute: 800, killParticipation: .6, mvpScore: .7 },
+    { matchId: 8, heroId: 10, won: true, gameDurationSeconds: 1800, items: [{ itemId: 1, gameTimeSeconds: 120 }, { itemId: 2, gameTimeSeconds: 320 }], kda: 5, spm: 1000, damagePerMinute: 900, killParticipation: .7, mvpScore: .8 },
+    { matchId: 7, heroId: 20, won: false, gameDurationSeconds: 1800, items: [{ itemId: 99, gameTimeSeconds: 80 }], kda: 1, spm: 500, damagePerMinute: 400, killParticipation: .2, mvpScore: .1 },
+  ];
+  const profile = buildPersonalHeroProfile(123, 10, matches);
+  assert.equal(profile.matches, 2);
+  assert.equal(buildPersonalHeroProfile(123, 10, [...matches, matches[0]]).matches, 2);
+  assert.deepEqual(profile.itemStats.map((item) => item.itemId), [1, 2]);
+  assert.equal(profile.avgSpm, 950);
+  assert.ok(personalSequencePrior(profile, [1], 2) > 0);
+  assert.equal(personalSequencePrior(profile, [1], 99), 0);
+  assert.equal(personalSignals(profile).get(1).matches, 2);
+});
+
+test("personal evidence is capped: two matches cannot overturn population data and 50 weigh more than five", () => {
+  const items = [
+    { itemId: 1, baselineRate: .57, exactRate: null, exactMatches: 0, enemyRates: [] },
+    { itemId: 2, baselineRate: .55, exactRate: null, exactMatches: 0, enemyRates: [] },
+  ];
+  const profileWith = (matches) => new Map([[2, { personalFit: .95, matches, avgBuyTimeSeconds: 600 }]]);
+  const population = rankItems(items, [], 600);
+  const two = rankItems(items, [], 600, profileWith(2));
+  const five = rankItems(items, [], 600, profileWith(5));
+  const fifty = rankItems(items, [], 600, profileWith(50));
+  assert.equal(two[0].itemId, 1);
+  const delta = (ranked) => ranked.find((item) => item.itemId === 2).score - population.find((item) => item.itemId === 2).score;
+  assert.ok(delta(two) < delta(five));
+  assert.ok(delta(five) < delta(fifty));
+});
+
+test("rank cohort spans adjacent ranks and safely disables for unknown rank", () => {
+  assert.deepEqual(rankCohort(94), { min: 84, max: 104 });
+  assert.deepEqual(rankCohort(11), { min: 11, max: 21 });
+  assert.equal(rankCohort(null), null);
+  assert.equal(rankDataHasCoverage([20, 200, 80, 30, 25, 20, 70, 100]), true);
+  assert.equal(rankDataHasCoverage([20, 30, 15, 5]), false);
+});
+
+test("recommendation outcome logging joins actual purchases once and is idempotent by match ID", () => {
+  const data = new Map();
+  const storage = { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
+  recordRecommendationSnapshot(123, 9001, 10, 601, [{ itemId: 1, score: .7 }, { itemId: 2, score: .6 }], storage);
+  recordRecommendationSnapshot(123, 9001, 10, 630, [{ itemId: 1, score: .8 }, { itemId: 3, score: .55 }], storage);
+  const match = { matchId: 9001, players: [{ account_id: 123, hero_id: 10, playerWon: true, items: [{ item_id: 2, game_time_s: 500 }], metrics: { soulsPerMinute: 920, kdaRatio: 3.1, damagePerMinute: 1100, killParticipation: .68 }, mvpScore: .75 }] };
+  const first = completeRecommendationOutcome(123, match, storage);
+  const again = completeRecommendationOutcome(123, match, storage);
+  assert.deepEqual(again, first);
+  assert.equal(first.result, "win");
+  assert.deepEqual(first.actualPurchases, [{ itemId: 2, gameTime: 500 }]);
+  assert.equal(first.recommendations.length, 3);
+  assert.equal(recommendationOutcomeCache(123, storage).pending[9001], undefined);
+  assert.equal(recommendationOutcomeCache(123, storage).completed[9001].performance.spm, 920);
+});
+
+test("Statlocker batch match proxy keeps API key server-side and maps rate limits", async () => {
+  const { POST } = await import("../app/api/statlocker/matches/route.ts");
+  const originalKey = process.env.STATLOCKER_API_KEY;
+  const originalFetch = globalThis.fetch;
+  process.env.STATLOCKER_API_KEY = "server-only-key";
+  try {
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, "https://statlocker.gg/api/public/matches");
+      assert.equal(new Headers(init?.headers).get("X-API-Key"), "server-only-key");
+      assert.deepEqual(JSON.parse(init.body), [1, 2]);
+      return new Response("", { status: 429 });
+    };
+    const response = await POST(new Request("http://localhost/api/statlocker/matches", { method: "POST", body: JSON.stringify([1, 2]) }));
+    assert.deepEqual(await response.json(), { status: "rate_limited", matches: [] });
+    const invalid = await POST(new Request("http://localhost/api/statlocker/matches", { method: "POST", body: JSON.stringify([0]) }));
+    assert.equal(invalid.status, 400);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.STATLOCKER_API_KEY;
+    else process.env.STATLOCKER_API_KEY = originalKey;
+  }
 });
 
 test("Statlocker profile route never needs a client-supplied key and handles disabled configuration", async () => {
