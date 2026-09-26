@@ -181,6 +181,7 @@ impl GameReader {
             &list,
             &self.mem,
             &self.offsets.player,
+            &self.offsets.pawn,
             self.offsets.client.max_entities,
         )
         .into_iter()

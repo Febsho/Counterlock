@@ -11,6 +11,8 @@ export type DesktopPlayer = {
   deaths: number | null;
   assists: number | null;
   net_worth: number | null;
+  unspent_souls: number | null;
+  owned_item_class_tokens: number[] | null;
   items: number[] | null;
 };
 
@@ -36,7 +38,7 @@ export type DesktopStatus = {
   match_id: number | null;
   account_id: number | null;
   provider: string;
-  capabilities: { roster: boolean; net_worth: boolean; items: boolean };
+  capabilities: { roster: boolean; net_worth: boolean; unspent_souls: boolean; items: boolean };
   last_error: string | null;
 };
 
@@ -44,12 +46,12 @@ export type DesktopPreferences = { close_to_tray: boolean; compact_always_on_top
 export type DesktopMonitor = { index: number; name: string; x: number; y: number; width: number; height: number };
 
 export type DesktopAdviceItem = { item_id: number; name: string; cost: number; score: number; reason: string; affordable: boolean | null; priority: number };
-export type DesktopAdvice = { match_id: number | null; inventory_known: boolean; recommended: DesktopAdviceItem | null; alternatives: DesktopAdviceItem[] };
+export type DesktopAdvice = { match_id: number | null; inventory_known: boolean; owned_item_ids: number[]; recommended: DesktopAdviceItem | null; alternatives: DesktopAdviceItem[] };
 export type AdvisorEvidence = {
   hero_id: number;
   enemy_ids: number[];
-  items: Array<{ item_id: number; name: string; cost: number; baseline_rate: number; team_rate: number; team_matches: number; average_buy_time_s: number;
-    enemy_rates: Array<{ hero_id: number; hero_name: string; rate: number; matches: number }> }>;
+  item_catalog: Array<{ item_id: number; class_name: string }>;
+  items: Array<{ item_id: number; name: string; cost: number; score: number; reason: string }>;
 };
 
 export const desktopAvailable = () => typeof window !== "undefined" && isTauri();

@@ -28,9 +28,10 @@ export function DesktopLivePanel({ status, match, heroes, advice, onOpenBuild }:
     <div className="desktop-live-heading"><div><small>COUNTERLOCK / CURRENT MATCH</small><h1>{live ? "Live match" : status.game_running ? "Deadlock is running" : "Ready for match"}</h1><p>{live ? "Player values read from your running Deadlock client." : status.game_running ? "Waiting for a local match and verified game memory." : "Launch Deadlock to start local match detection."}</p></div><span className={`desktop-live-indicator${live ? " active" : ""}`}>{live ? "● LIVE MEMORY" : "○ WAITING"}</span></div>
     <div className="desktop-live-grid">
       <article className="desktop-live-card desktop-your-stats"><header><h2>Your stats</h2><span>{own?.hero_id != null ? heroes.get(own.hero_id)?.name ?? `Hero #${own.hero_id}` : "—"}</span></header>
+        <div className="desktop-stat-feature"><small>UNSPENT SOULS</small><strong>{own?.unspent_souls?.toLocaleString() ?? "—"}</strong></div>
         <div className="desktop-stat-feature"><small>TOTAL NET WORTH</small><strong>{own?.net_worth?.toLocaleString() ?? "—"}</strong></div>
         <div className="desktop-stat-triplet"><div><small>KILLS</small><strong>{own?.kills ?? "—"}</strong></div><div><small>DEATHS</small><strong>{own?.deaths ?? "—"}</strong></div><div><small>ASSISTS</small><strong>{own?.assists ?? "—"}</strong></div></div>
-        <p className="desktop-stat-note">Net worth is your total earned value. Unspent shop balance, rank and personal win rate are not available from this memory reader.</p>
+        <p className="desktop-stat-note">Unspent souls come from your live hero pawn currency. Net worth remains total earned value; rank and personal win rate are not available from memory.</p>
       </article>
       <article className="desktop-live-card desktop-match-card"><header><h2>Current match</h2><span>{match?.players.length ?? 0} PLAYERS DETECTED</span></header>
         {live ? <><div className="desktop-team-heading">YOUR TEAM <span>{allies.length} PLAYERS</span></div><div className="desktop-player-list">{allies.map((player, index) => playerRow(player, heroes, match.account_id, index))}</div>

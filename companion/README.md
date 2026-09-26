@@ -104,7 +104,8 @@ Snapshot shape:
   "players": [{
     "account_id": 42, "hero_id": 7, "team": 0, "slot": 1,
     "kills": null, "deaths": null, "assists": null,
-    "net_worth": null, "souls_per_minute": null, "items": null
+    "net_worth": null, "unspent_souls": null, "souls_per_minute": null,
+    "items": null, "owned_item_class_tokens": null
   }]
 }
 ```
@@ -125,8 +126,9 @@ Three sources, selected with `provider` in the config.
 | match id, roster, hero ids, teams | yes | yes | partial |
 | game time / phase | yes | yes | yes |
 | kills / deaths / assists | **yes** | no | yes |
-| net worth (souls) | **yes** | no | yes |
-| items | no | no | yes |
+| total net worth | **yes** | no | yes |
+| unspent shop souls | **yes** (supported build) | no | partial |
+| owned items | **yes**, as item-class tokens | no | partial |
 | pause state | **yes** | no | no |
 
 `deadlock-api` only publishes what Deadlock's own Watch tab exposes, which is
@@ -142,7 +144,7 @@ data this client already received — an external reader cannot surface
 information the server withheld, so it yields no information the scoreboard
 does not already show you.
 
-It reads the roster during `HeroSelection`, `MatchIntro` and `PreGameWait`, so
+On the exact supported client build, the reader follows the local pawn ability list and reports item-class tokens plus the separate live unspent-soul balance. The desktop resolves those tokens against its current item catalog. It reads the roster during `HeroSelection`, `MatchIntro` and `PreGameWait`, so
 the draft is available before the horn, and derives souls/minute from
 `m_iGoldNetWorth` and the engine clock (`curtime - m_flGameStartTime`).
 

@@ -22,6 +22,7 @@ pub struct Capabilities {
     pub game_time: bool,
     pub kills_deaths_assists: bool,
     pub net_worth: bool,
+    pub unspent_souls: bool,
     pub items: bool,
     pub pause_state: bool,
 }
@@ -39,6 +40,7 @@ impl Capabilities {
             (self.game_time, "game_time"),
             (self.kills_deaths_assists, "kills_deaths_assists"),
             (self.net_worth, "net_worth"),
+            (self.unspent_souls, "unspent_souls"),
             (self.items, "items"),
             (self.pause_state, "pause_state"),
         ] {
@@ -91,7 +93,7 @@ mod tests {
         let provider = NullProvider;
         assert_eq!(provider.id(), "none");
         assert!(provider.fetch(Some(1)).unwrap().is_none());
-        assert_eq!(provider.capabilities().unavailable_fields().len(), 9);
+        assert_eq!(provider.capabilities().unavailable_fields().len(), 10);
     }
 
     #[test]

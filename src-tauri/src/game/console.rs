@@ -89,6 +89,7 @@ pub const CAPABILITIES: crate::provider::Capabilities = crate::provider::Capabil
     game_time: false,
     kills_deaths_assists: false,
     net_worth: false,
+    unspent_souls: false,
     items: false,
     pause_state: false,
 };

@@ -80,6 +80,8 @@ impl From<WirePlayer> for PlayerState {
             deaths: wire.deaths,
             assists: wire.assists,
             net_worth: wire.net_worth,
+            unspent_souls: None,
+            owned_item_class_tokens: None,
             // Derived later by MatchSnapshot::finalize.
             souls_per_minute: None,
             items: wire.items,
@@ -102,6 +104,7 @@ impl MatchDataProvider for DeadlockApiProvider {
             // Present only for matches the spectator feed fully publishes.
             kills_deaths_assists: false,
             net_worth: false,
+            unspent_souls: false,
             items: false,
             // The live feed exposes no pause state.
             pause_state: false,

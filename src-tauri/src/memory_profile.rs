@@ -34,6 +34,14 @@ pub fn apply_for_installed_build(config: &mut Config, installation: &Installatio
     offsets.player.kills = Some(0x944);
     offsets.player.assists = Some(0x948);
     offsets.player.deaths = Some(0x94c);
+    offsets.player.hero_pawn = Some(0x8ac);
+    offsets.pawn.currencies = Some(0x12e0);
+    offsets.pawn.gold_currency_index = 0;
+    offsets.pawn.ability_component = Some(0x14d0);
+    offsets.pawn.abilities_vector = Some(0x68);
+    offsets.pawn.abilities_data = Some(0x8);
+    offsets.pawn.ability_subclass_id = Some(0x388);
+    offsets.pawn.ability_slot = Some(0x778);
     tracing::info!("verified local game-memory profile loaded");
 }
 
@@ -58,5 +66,7 @@ mod tests {
         assert!(snapshot.players.len() >= 2);
         assert!(snapshot.players.iter().any(|player| player.account_id.is_some()));
         assert!(snapshot.players.iter().all(|player| player.hero_id.is_some()));
+        assert!(snapshot.players.iter().any(|player| player.account_id.is_some() && player.unspent_souls.is_some()));
+        assert!(snapshot.players.iter().any(|player| player.account_id.is_some() && player.owned_item_class_tokens.is_some()), "live ability list was not readable");
     }
 }

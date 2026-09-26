@@ -23,8 +23,8 @@ use crate::game::GameReader;
 
 /// What the reader can supply once it is attached and the offsets fit.
 ///
-/// `items` is false: the inventory walk is not implemented, so item ids stay
-/// empty rather than being reported as "no items bought".
+/// Item class tokens are walked from the pawn ability list on the exact-build
+/// profile and resolved to catalog item IDs by the desktop.
 pub const ATTACHED_CAPABILITIES: Capabilities = Capabilities {
     match_id: true,
     roster: true,
@@ -33,7 +33,8 @@ pub const ATTACHED_CAPABILITIES: Capabilities = Capabilities {
     game_time: true,
     kills_deaths_assists: true,
     net_worth: true,
-    items: false,
+    unspent_souls: true,
+    items: true,
     pause_state: true,
 };
 
@@ -162,6 +163,8 @@ impl MatchDataProvider for AttachedProvider {
                             .players
                             .iter()
                             .any(|player| player.net_worth.is_some()),
+                        unspent_souls: snapshot.players.iter().any(|player| player.unspent_souls.is_some()),
+                        items: snapshot.players.iter().find(|player| player.account_id == snapshot.account_id).and_then(|player| player.owned_item_class_tokens.as_ref()).is_some(),
                         kills_deaths_assists: snapshot
                             .players
                             .iter()
@@ -214,7 +217,8 @@ mod tests {
         assert!(!api.kills_deaths_assists && attached.kills_deaths_assists);
         assert!(!api.net_worth && attached.net_worth);
         assert!(!api.pause_state && attached.pause_state);
-        // Items are the one gap: the inventory walk is not implemented.
-        assert_eq!(attached.unavailable_fields(), vec!["items"]);
+        assert!(api.unspent_souls == false && attached.unspent_souls);
+        assert!(!api.items && attached.items);
+        assert!(attached.unavailable_fields().is_empty());
     }
 }

@@ -42,6 +42,13 @@ pub struct PlayerState {
     pub assists: Option<u32>,
     /// Total gold net worth, not the unspent shop balance.
     pub net_worth: Option<u32>,
+    /// Current unspent shop souls, read from the hero pawn currency array.
+    #[serde(default)]
+    pub unspent_souls: Option<u32>,
+    /// String-token hashes for ability entities in shop item slots.
+    /// Resolved to canonical item IDs by the desktop asset catalog.
+    #[serde(default)]
+    pub owned_item_class_tokens: Option<Vec<u32>>,
     /// Derived: `net_worth / active_game_minutes`. `None` whenever net worth is
     /// absent or no active time has elapsed yet.
     pub souls_per_minute: Option<f64>,

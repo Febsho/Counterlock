@@ -141,15 +141,17 @@ fn submit_local_roster(
 }
 
 fn update_advice(app: &tauri::AppHandle, shared: &Shared) {
-    let next = {
+    let (computed, previous) = {
         let state = shared.read().unwrap();
-        match (&state.snapshot, &state.evidence) {
+        let next = match (&state.snapshot, &state.evidence) {
             (Some(snapshot), Some(evidence)) => {
                 advisor::recommend(snapshot, state.status.capabilities, evidence)
             }
             _ => None,
-        }
+        };
+        (next, state.advice.clone())
     };
+    let next = advisor::stabilize(previous, computed);
     let mut state = shared.write().unwrap();
     if state.advice != next {
         state.advice = next.clone();
@@ -267,6 +269,10 @@ fn same_match_data(left: &Option<MatchSnapshot>, right: &Option<MatchSnapshot>) 
         }
         _ => false,
     }
+}
+
+fn match_ended(running: bool, in_match: Option<bool>, confirmed_new_match: bool) -> bool {
+    !running || in_match == Some(false) || confirmed_new_match
 }
 
 fn poll_loop(
@@ -393,12 +399,11 @@ fn poll_loop(
                 .match_id
                 .zip(next_snapshot.as_ref().and_then(|s| s.match_id))
                 .is_some_and(|(old, new)| old != new);
-            if next_snapshot.is_none() || confirmed_new_match {
+            let match_ended = match_ended(running, console.in_match, confirmed_new_match);
+            if next_snapshot.is_none() || confirmed_new_match || match_ended {
                 if let Err(error) = app.state::<Storage>().save_match(&previous) {
                     tracing::warn!(%error, "saving completed match failed");
                 }
-                let match_ended =
-                    !running || console.in_match == Some(false) || confirmed_new_match;
                 if match_ended {
                     if let Some(match_id) = previous.match_id {
                         match app
@@ -630,5 +635,12 @@ mod tests {
         assert!(same_match_data(&Some(first), &Some(second.clone())));
         second.players.push(Default::default());
         assert!(!same_match_data(&None, &Some(second)));
+    }
+
+    #[test]
+    fn explicit_console_match_end_finalizes_even_while_snapshot_remains_available() {
+        let snapshot_still_available = true;
+        let ended = match_ended(true, Some(false), false);
+        assert!(snapshot_still_available && ended);
     }
 }

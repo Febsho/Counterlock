@@ -4,6 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import { captureHud, checkForDesktopUpdate, desktopAvailable, getDesktopMatch, getDesktopStatus, getDesktopMonitors, getDesktopPreferences, getLastMatch, getRecommendations, installDesktopUpdate, onDesktopMatch, onDesktopStatus, onOpenSettings, onRecommendations, saveDesktopPreferences, setAdvisorEvidence, submitLocalRoster, type DesktopAdvice, type DesktopMatch, type DesktopStatus, type DesktopPreferences, type DesktopMonitor } from "./desktop";
 import { DesktopLivePanel } from "./DesktopLivePanel";
 import { DesktopBuildLab } from "./DesktopBuildLab";
+import { cachedJson } from "./lib/data/cache";
+import { rankItems } from "./lib/build-engine/scoring";
+import { itemFlowStats, itemStatsUrl } from "./lib/data/deadlock-api";
+import { bestFlowPath, flowCoreFit } from "./lib/build-engine/build-flow";
+import { counterCapability, tagsForItem, tagMatchesManualThreat } from "./lib/build-engine/counter-tags";
+import { threatsForHero } from "./lib/build-engine/hero-threats";
+import { scoreThreats } from "./lib/build-engine/threat-score";
+import { buildUpgradeGraph } from "./lib/build-engine/upgrade-graph";
+import { optimizeSlots } from "./lib/build-engine/slot-optimizer";
+import { findSellDecisions, planPurchasePath, rankNextBuys, type PlanCandidate } from "./lib/build-engine/planner";
+import { fetchStatlockerProfiles, type StatlockerStatus } from "./lib/data/statlocker";
 
 const API = "https://api.deadlock-api.com/v1";
 
@@ -33,7 +44,7 @@ type ItemStat = { item_id: number; wins: number; losses: number; matches: number
 type EnemyBuildSignal = { heroId: number; stats: ItemStat[] };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
-type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[] };
+type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; exactMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[]; advisorReason?: string; coreFit?: number; counterFit?: number; mechanicFit?: number; exactFit?: number; threatTargets?: number[] };
 type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all">; isOwn?: boolean; playerName?: string };
 type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
 type ScoreboardSheet = { canvas: HTMLCanvasElement; rowHeight: number };
@@ -48,7 +59,7 @@ type CompanionRoster = { match_id: number | null; account_id: number | null; dur
 const copy = {
   en: {
     home: "Counterlock home", heroKicker: "DEADLOCK MATCHUP INTELLIGENCE", lightMode: "LIGHT", darkMode: "DARK", latestPatch: "LATEST PATCH", loadingPatch: "CHECKING PATCH…", patchUnavailable: "Patch notes are temporarily unavailable.", openPatch: "OPEN FULL PATCH NOTES", companionConnected: "LOCAL COMPANION CONNECTED", companionSearching: "WAITING FOR LOCAL MATCH", companionUnavailable: "LOCAL COMPANION OFFLINE",
-    nextBuy: "NEXT BUY", nextBuyText: "Best fit for your current match state", matchState: "MATCH STATE", ahead: "AHEAD", even: "EVEN", behind: "BEHIND", buildPath: "BUILD PATH", balanced: "BALANCED", safe: "SAFE", greedy: "GREEDY", threats: "ENEMY THREATS", healing: "HEALING", weaponDamage: "WEAPON", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER ALERTS", enemyBuildSignals: "ENEMY BUILD SIGNALS", lifestealDetected: "Common lifesteal build detected — anti-heal is boosted.", alertHealing: "Enemy healing marked — prioritize anti-heal items.", alertWeapon: "Weapon damage marked — favor bullet defense next.", alertSpirit: "Spirit damage marked — favor spirit defense next.", alertCrowdControl: "Crowd control marked — consider debuff resistance.", patchFreshness: "PATCH DATA", patchFresh: "Latest patch data is being used; new-patch samples may still be stabilizing.", souls: "SOULS AVAILABLE", needSouls: "MORE SOULS NEEDED", affordable: "AFFORDABLE NOW", totalBuildCost: "FULL BUILD COST", remainingCost: "REMAINING", planChecks: "BUILD CHECK", planReady: "16 unique items · no conflicts found", overlay: "MATCH OVERLAY", closeOverlay: "Close match overlay", savePreset: "SAVE SETUP", loadPreset: "LOAD SETUP", presetSaved: "SETUP SAVED", presetMissing: "NO SAVED SETUP", situationalSlots: "SITUATIONAL", enemyDetails: "ENEMY BUILD DETAIL", closeDetails: "Close enemy build detail", commonBuild: "COMMON ITEMS", recommendationReason: "WHY", currentItem: "CURRENT ITEM", markOwned: "MARK OWNED", removeOwned: "REMOVE", duplicatePlan: "Already owned — skipped from next buy", patchCompare: "PATCH STATUS", patchCompareText: "Recommendations use current patch data; early samples can shift as more matches arrive.",
+    nextBuy: "NEXT BUY", nextBuyText: "Best fit for your current match state", matchState: "MATCH STATE", ahead: "AHEAD", even: "EVEN", behind: "BEHIND", buildPath: "BUILD PATH", balanced: "BALANCED", safe: "SAFE", greedy: "GREEDY", threats: "ENEMY THREATS", healing: "HEALING", weaponDamage: "WEAPON", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER ALERTS", enemyBuildSignals: "COMMON ENEMY ITEMS · HISTORICAL", lifestealDetected: "Common enemy item tendencies suggest sustain; anti-heal is weighted when relevant.", alertHealing: "Enemy healing marked — prioritize anti-heal items.", alertWeapon: "Weapon damage marked — favor bullet defense next.", alertSpirit: "Spirit damage marked — favor spirit defense next.", alertCrowdControl: "Crowd control marked — consider debuff resistance.", patchFreshness: "PATCH DATA", patchFresh: "Latest patch data is being used; new-patch samples may still be stabilizing.", souls: "SOULS AVAILABLE", needSouls: "MORE SOULS NEEDED", affordable: "AFFORDABLE NOW", totalBuildCost: "FULL BUILD COST", remainingCost: "REMAINING", planChecks: "BUILD CHECK", planReady: "16 unique items · no conflicts found", overlay: "MATCH OVERLAY", closeOverlay: "Close match overlay", savePreset: "SAVE SETUP", loadPreset: "LOAD SETUP", presetSaved: "SETUP SAVED", presetMissing: "NO SAVED SETUP", situationalSlots: "SITUATIONAL", enemyDetails: "ENEMY BUILD DETAIL", closeDetails: "Close enemy build detail", commonBuild: "COMMON ITEMS", recommendationReason: "WHY", currentItem: "CURRENT ITEM", markOwned: "MARK OWNED", removeOwned: "REMOVE", duplicatePlan: "Already owned — skipped from next buy", patchCompare: "PATCH STATUS", patchCompareText: "Recommendations use current patch data; early samples can shift as more matches arrive.",
     heroTitleA: "Build for the fight", heroTitleB: "happening right now.",
     heroText: "Choose your hero, mark the enemy carry, and get item recommendations ranked with real matchup data.",
     yourHero: "YOUR HERO", youPlay: "YOU PLAY", chooseHero: "Choose your hero", changeHero: "CHANGE HERO", searchHero: "Search heroes…", heroRoster: "HERO ROSTER", heroesAvailable: "heroes available", selectedHero: "SELECTED", enemyPick: "ENEMY PICK", closeHeroPicker: "Close hero picker",
@@ -86,7 +97,7 @@ const copy = {
   },
   de: {
     home: "Counterlock Startseite", heroKicker: "DEADLOCK MATCHUP-ANALYSE", lightMode: "HELL", darkMode: "DUNKEL", latestPatch: "LETZTER PATCH", loadingPatch: "PATCH WIRD GEPRÜFT…", patchUnavailable: "Patch-Notizen sind momentan nicht verfügbar.", openPatch: "VOLLE PATCH-NOTIZEN ÖFFNEN", companionConnected: "LOKALER COMPANION VERBUNDEN", companionSearching: "WARTE AUF LOKALES MATCH", companionUnavailable: "LOKALER COMPANION OFFLINE",
-    nextBuy: "NÄCHSTER KAUF", nextBuyText: "Beste Wahl für den aktuellen Match-Zustand", matchState: "MATCH-STATUS", ahead: "VORAUS", even: "GLEICH", behind: "HINTEN", buildPath: "BUILD-PFAD", balanced: "AUSGEWOGEN", safe: "SICHER", greedy: "GIERIG", threats: "GEGNERISCHE GEFAHREN", healing: "HEILUNG", weaponDamage: "WAFFE", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER-ALARME", enemyBuildSignals: "GEGNERISCHE BUILD-SIGNALE", lifestealDetected: "Häufiger Lifesteal-Build erkannt — Anti-Heal wird verstärkt.", alertHealing: "Gegnerische Heilung markiert — Anti-Heal-Items priorisieren.", alertWeapon: "Waffenschaden markiert — als Nächstes Bullet-Defense bevorzugen.", alertSpirit: "Spirit-Schaden markiert — als Nächstes Spirit-Defense bevorzugen.", alertCrowdControl: "Crowd Control markiert — Debuff-Resistenz erwägen.", patchFreshness: "PATCH-DATEN", patchFresh: "Daten des neuesten Patches werden genutzt; new-patch samples may still be stabilizing.", souls: "VERFÜGBARE SEELEN", needSouls: "MEHR SEELEN NÖTIG", affordable: "JETZT KAUFBAR", totalBuildCost: "BUILD-GESAMTKOSTEN", remainingCost: "VERBLEIBEND", planChecks: "BUILD-CHECK", planReady: "16 einzigartige Items · keine Konflikte", overlay: "MATCH-OVERLAY", closeOverlay: "Match-Overlay schließen", savePreset: "SETUP SPEICHERN", loadPreset: "SETUP LADEN", presetSaved: "SETUP GESPEICHERT", presetMissing: "KEIN GESPEICHERTES SETUP", situationalSlots: "SITUATIV", enemyDetails: "GEGNER-BUILD-DETAIL", closeDetails: "Gegner-Build-Detail schließen", commonBuild: "HÄUFIGE ITEMS", recommendationReason: "WARUM", currentItem: "AKTUELLES ITEM", markOwned: "ALS BESITZT MARKIEREN", removeOwned: "ENTFERNEN", duplicatePlan: "Bereits vorhanden — beim nächsten Kauf übersprungen", patchCompare: "PATCH-STATUS", patchCompareText: "Empfehlungen nutzen Daten des aktuellen Patches; frühe Stichproben können sich noch verändern.",
+    nextBuy: "NÄCHSTER KAUF", nextBuyText: "Beste Wahl für den aktuellen Match-Zustand", matchState: "MATCH-STATUS", ahead: "VORAUS", even: "GLEICH", behind: "HINTEN", buildPath: "BUILD-PFAD", balanced: "AUSGEWOGEN", safe: "SICHER", greedy: "GIERIG", threats: "GEGNERISCHE GEFAHREN", healing: "HEILUNG", weaponDamage: "WAFFE", spiritDamage: "SPIRIT", crowdControl: "CROWD CONTROL", counterAlerts: "COUNTER-ALARME", enemyBuildSignals: "HÄUFIGE GEGNER-ITEMS · HISTORISCH", lifestealDetected: "Häufige gegnerische Item-Tendenzen deuten auf Sustain; Anti-Heal wird passend gewichtet.", alertHealing: "Gegnerische Heilung markiert — Anti-Heal-Items priorisieren.", alertWeapon: "Waffenschaden markiert — als Nächstes Bullet-Defense bevorzugen.", alertSpirit: "Spirit-Schaden markiert — als Nächstes Spirit-Defense bevorzugen.", alertCrowdControl: "Crowd Control markiert — Debuff-Resistenz erwägen.", patchFreshness: "PATCH-DATEN", patchFresh: "Daten des neuesten Patches werden genutzt; new-patch samples may still be stabilizing.", souls: "VERFÜGBARE SEELEN", needSouls: "MEHR SEELEN NÖTIG", affordable: "JETZT KAUFBAR", totalBuildCost: "BUILD-GESAMTKOSTEN", remainingCost: "VERBLEIBEND", planChecks: "BUILD-CHECK", planReady: "16 einzigartige Items · keine Konflikte", overlay: "MATCH-OVERLAY", closeOverlay: "Match-Overlay schließen", savePreset: "SETUP SPEICHERN", loadPreset: "SETUP LADEN", presetSaved: "SETUP GESPEICHERT", presetMissing: "KEIN GESPEICHERTES SETUP", situationalSlots: "SITUATIV", enemyDetails: "GEGNER-BUILD-DETAIL", closeDetails: "Gegner-Build-Detail schließen", commonBuild: "HÄUFIGE ITEMS", recommendationReason: "WARUM", currentItem: "AKTUELLES ITEM", markOwned: "ALS BESITZT MARKIEREN", removeOwned: "ENTFERNEN", duplicatePlan: "Bereits vorhanden — beim nächsten Kauf übersprungen", patchCompare: "PATCH-STATUS", patchCompareText: "Empfehlungen nutzen Daten des aktuellen Patches; frühe Stichproben können sich noch verändern.",
     heroTitleA: "Baue für den Kampf,", heroTitleB: "der gerade passiert.",
     heroText: "Wähle deinen Helden, markiere den gegnerischen Carry und erhalte Item-Empfehlungen aus echten Matchup-Daten.",
     yourHero: "DEIN HELD", youPlay: "DU SPIELST", chooseHero: "Helden auswählen", changeHero: "HELD WECHSELN", searchHero: "Helden suchen…", heroRoster: "HELDEN-ROSTER", heroesAvailable: "Helden verfügbar", selectedHero: "AUSGEWÄHLT", enemyPick: "GEGNER-PICK", closeHeroPicker: "Heldenauswahl schließen",
@@ -341,6 +352,7 @@ export default function Home() {
   const [selectedEnemySignal, setSelectedEnemySignal] = useState<EnemyBuildSignal | null>(null);
   const [presetMessage, setPresetMessage] = useState("");
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [itemFlow, setItemFlow] = useState<import("./lib/data/deadlock-api").ItemFlowStats | null>(null);
   const [enemyBuildSignals, setEnemyBuildSignals] = useState<EnemyBuildSignal[]>([]);
   const [matchup, setMatchup] = useState<CounterStat | null>(null);
   const [allCounterStats, setAllCounterStats] = useState<CounterStat[]>([]);
@@ -348,6 +360,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [statlockerStatus, setStatlockerStatus] = useState<StatlockerStatus>("not_configured");
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
@@ -370,6 +383,7 @@ export default function Home() {
   const [desktopTab, setDesktopTab] = useState<"match" | "build" | "system">("match");
   const [desktopLastMatch, setDesktopLastMatch] = useState<DesktopMatch | null>(null);
   const [desktopAdvice, setDesktopAdvice] = useState<DesktopAdvice | null>(null);
+  const [desktopOwnedItemIds, setDesktopOwnedItemIds] = useState<number[]>([]);
   const [desktopCaptureBusy, setDesktopCaptureBusy] = useState(false);
   const [desktopCaptureError, setDesktopCaptureError] = useState("");
   const [updateStatus, setUpdateStatus] = useState("");
@@ -404,7 +418,9 @@ export default function Home() {
   const allyTeamIds = useMemo(() => [heroId, ...allyIds], [allyIds, heroId]);
   const allMatchHeroIds = useMemo(() => [...allyTeamIds, ...enemyIds], [allyTeamIds, enemyIds]);
 
+  // Keep lane assignments for newly selected roster entries in sync with the roster.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronizes derived lane state after roster edits
     setLaneAssignments((current) => {
       const next: Record<number, Exclude<Lane, "all">> = {};
       const assignMissing = (ids: number[]) => ids.forEach((id, index) => { next[id] = current[id] ?? (index < 2 ? "yellow" : index < 4 ? "blue" : "green"); });
@@ -413,15 +429,19 @@ export default function Home() {
     });
   }, [allyTeamIds, enemyIds]);
 
+  // Apply the selected hero's lane to the matchup controls after lineup changes.
   useEffect(() => {
     const ownLane = laneAssignments[heroId]; if (!ownLane) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronizes dependent matchup controls
     setLane(ownLane); setLaneOnly(true);
     const laneEnemies = enemyIds.filter((id) => laneAssignments[id] === ownLane);
     if (laneEnemies.length && !laneEnemies.includes(laneOpponentId)) setLaneOpponentId(laneEnemies[0]);
   }, [enemyIds, heroId, laneAssignments, laneOpponentId]);
 
+  // Restore browser-persisted preferences and shared-link inputs after hydration.
   useEffect(() => {
     const saved = window.localStorage.getItem("counterbuild-language");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrates state from browser storage and URL
     if (saved === "de" || saved === "en") setLang(saved);
     const savedTheme = window.localStorage.getItem("counterlock-theme");
     if (savedTheme === "light" || savedTheme === "dark") setDarkMode(savedTheme === "dark");
@@ -517,9 +537,10 @@ export default function Home() {
     const applySnapshot = (snapshot: DesktopMatch | null) => {
       if (!active) return;
       setDesktopLiveMatch(snapshot);
-      if (!snapshot) { desktopRosterKeyRef.current = null; setDesktopSoulsKnown(null); void getLastMatch().then((last) => active && setDesktopLastMatch(last)); return; }
-      // The reader supplies total net worth, not the unspent shop balance.
-      setDesktopSoulsKnown(false);
+      if (!snapshot) { desktopRosterKeyRef.current = null; setDesktopSoulsKnown(null); setDesktopOwnedItemIds([]); void getLastMatch().then((last) => active && setDesktopLastMatch(last)); return; }
+      const own = snapshot.players.find((entry) => entry.account_id != null && entry.account_id === snapshot.account_id);
+      setDesktopSoulsKnown(own?.unspent_souls != null);
+      if (own?.unspent_souls != null) setSouls(own.unspent_souls);
       // An empty inventory is meaningful only when the selected provider can read it.
       const rosterKey = JSON.stringify([snapshot.match_id, snapshot.account_id, snapshot.players.map((entry) => [entry.account_id, entry.hero_id, entry.team])]);
       if (snapshot.players.length && snapshot.account_id != null && desktopRosterKeyRef.current !== rosterKey) {
@@ -554,23 +575,18 @@ export default function Home() {
     return () => { active = false; stop?.(); };
   }, []);
 
+  const enemyBuildInsights = useMemo(() => enemyBuildSignals.map((signal) => ({ ...signal, items: signal.stats.map((stat) => ({ stat, item: items.find((item) => item.id === stat.item_id) })).filter((entry): entry is { stat: ItemStat; item: Item } => Boolean(entry.item)) })), [enemyBuildSignals, items]);
+  const lifestealDetected = useMemo(() => enemyBuildInsights.some((signal) => signal.items.some(({ item }) => tagsForItem(item.class_name).includes("healing"))), [enemyBuildInsights]);
+
   useEffect(() => {
     if (!desktopAvailable()) return;
     let active = true;
     let stop: (() => void) | null = null;
-    void getRecommendations().then((advice) => { if (active) setDesktopAdvice(advice); });
-    void onRecommendations((advice) => { if (active) setDesktopAdvice(advice); }).then((unlisten) => { if (active) stop = unlisten; else unlisten(); });
+    const applyAdvice = (advice: DesktopAdvice | null) => { if (active) { setDesktopAdvice(advice); setDesktopOwnedItemIds(advice?.inventory_known ? advice.owned_item_ids ?? [] : []); } };
+    void getRecommendations().then(applyAdvice);
+    void onRecommendations(applyAdvice).then((unlisten) => { if (active) stop = unlisten; else unlisten(); });
     return () => { active = false; stop?.(); };
   }, []);
-
-  useEffect(() => {
-    if (!desktopAvailable() || !recommendations.length || !heroId || !enemyIds.length) return;
-    void setAdvisorEvidence({ hero_id: heroId, enemy_ids: enemyIds, items: recommendations.filter((entry) => entry.item.cost != null).map((entry) => ({
-      item_id: entry.item.id, name: entry.item.name, cost: entry.item.cost!, baseline_rate: entry.baselineRate,
-      team_rate: entry.teamRate, team_matches: entry.teamMatches, average_buy_time_s: entry.teamBuyTime,
-      enemy_rates: entry.enemyRates.map((rate) => ({ hero_id: rate.heroId, hero_name: heroMap.get(rate.heroId)?.name ?? `Hero #${rate.heroId}`, rate: rate.rate, matches: rate.matches })),
-    })) });
-  }, [recommendations, heroId, enemyIds, heroMap]);
 
   async function updateDesktopPreferences(patch: Partial<DesktopPreferences>) {
     if (!desktopPreferences) return;
@@ -615,39 +631,107 @@ export default function Home() {
       const matchupParams = new URLSearchParams(commonParams); matchupParams.set("same_lane_filter", String(laneOnly));
       const matchupCommon = matchupParams.toString();
       const laneCounterParams = new URLSearchParams(commonParams); laneCounterParams.set("same_lane_filter", "true");
-      const [baseStats, teamStats, carryStats, counterStats, laneStats, individualEnemyStats, enemyBuildStats] = await Promise.all([
-        fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&${common}`).then((r) => r.json()),
-        fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyIds.join(",")}&${matchupCommon}`).then((r) => r.json()),
-        fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${carryId}&${matchupCommon}`).then((r) => r.json()),
-        fetch(`${API}/analytics/hero-counter-stats?${matchupCommon}`).then((r) => r.json()),
-        fetch(`${API}/analytics/hero-counter-stats?${laneCounterParams}`).then((r) => r.json()),
-        Promise.all(enemyIds.map((enemyId) => fetch(`${API}/analytics/item-stats?hero_ids=${heroId}&enemy_hero_ids=${enemyId}&${matchupCommon}`).then((r) => r.json() as Promise<ItemStat[]>))),
-        Promise.all(enemyIds.map((enemyId) => fetch(`${API}/analytics/item-stats?hero_ids=${enemyId}&${common}`).then((r) => r.json() as Promise<ItemStat[]>))),
-      ] as const) as [ItemStat[], ItemStat[], ItemStat[], CounterStat[], CounterStat[], ItemStat[][], ItemStat[][]];
+      const responses = await Promise.allSettled([
+        cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(common))),
+        cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), enemyIds, true)),
+        cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), [carryId])),
+        cachedJson<CounterStat[]>(`${API}/analytics/hero-counter-stats?${matchupCommon}`),
+        cachedJson<CounterStat[]>(`${API}/analytics/hero-counter-stats?${laneCounterParams}`),
+        Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), [enemyId])))),
+        Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(enemyId, new URLSearchParams(common))))),
+      ] as const);
+      const unwrap = <T,>(result: PromiseSettledResult<T>, label: string, fallback: T): T => {
+        if (result.status === "fulfilled") return result.value;
+        console.warn(`Deadlock API ${label} unavailable; recommendations will use remaining evidence.`, result.reason);
+        return fallback;
+      };
+      const baseStats = unwrap(responses[0], "hero item stats", [] as ItemStat[]);
+      const teamStats = unwrap(responses[1], "exact enemy lineup item stats", [] as ItemStat[]);
+      const carryStats = unwrap(responses[2], "focus enemy item stats", [] as ItemStat[]);
+      const counterStats = unwrap(responses[3], "hero matchup stats", [] as CounterStat[]);
+      const laneStats = unwrap(responses[4], "lane matchup stats", [] as CounterStat[]);
+      const settlePerEnemy = (results: PromiseSettledResult<ItemStat[]>[], label: string) => results.map((result, index) => {
+        if (result.status === "fulfilled") return result.value;
+        console.warn(`Deadlock API ${label} unavailable for hero ${enemyIds[index]}; other enemy evidence remains usable.`, result.reason);
+        return [] as ItemStat[];
+      });
+      const individualEnemyStats = settlePerEnemy(unwrap(responses[5], "individual enemy item stats", []), "individual enemy item stats");
+      const enemyBuildStats = settlePerEnemy(unwrap(responses[6], "common enemy item stats", []), "common enemy item stats");
+      const flowQuery = new URLSearchParams(commonParams); flowQuery.set("hero_ids", String(heroId));
+      const flowResult = await Promise.allSettled([itemFlowStats(`${API}/analytics/item-flow-stats?${flowQuery}`)]);
+      if (runId !== analysisRunRef.current) return;
+      setItemFlow(flowResult[0].status === "fulfilled" ? flowResult[0].value : null);
+      if (flowResult[0].status === "rejected") console.warn("Optional Deadlock item-flow data unavailable; continuing with item and matchup statistics.", flowResult[0].reason);
       if (runId !== analysisRunRef.current) return;
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
       const carryMap = new Map(carryStats.map((stat) => [stat.item_id, stat]));
       const individualEnemyMaps = individualEnemyStats.map((stats) => new Map(stats.map((stat) => [stat.item_id, stat])));
       setEnemyBuildSignals(enemyIds.map((heroId, index) => ({ heroId, stats: enemyBuildStats[index].sort((a, b) => b.matches - a.matches).slice(0, 4) })));
-      setRecommendations(items.map((item) => {
+      const calculated = items.map((item) => {
         const base = baseMap.get(item.id), team = teamMap.get(item.id), carry = carryMap.get(item.id);
-        if (!team || !carry) return null;
-        const baselineRate = adjustedRate(base), winRate = adjustedRate(team), carryRate = adjustedRate(carry);
-        const carryConfidence = Math.min(1, Math.log10(Math.max(10, carry.matches)) / 4.7);
-        const teamConfidence = Math.min(1, Math.log10(Math.max(10, team.matches)) / 4.7);
+        if (!base && !team && !carry && !individualEnemyMaps.some((map) => map.has(item.id))) return null;
+        const carryItemEvidence = individualEnemyMaps[enemyIds.indexOf(carryId)]?.get(item.id);
+        const baselineRate = adjustedRate(base), winRate = team ? adjustedRate(team) : baselineRate, carryRate = carry ? adjustedRate(carry) : carryItemEvidence ? adjustedRate(carryItemEvidence) : baselineRate;
+        const carryMatches = carry?.matches ?? carryItemEvidence?.matches ?? 0;
+        const carryConfidence = carryMatches ? Math.min(1, Math.log10(Math.max(10, carryMatches)) / 4.7) : 0;
         const carryUplift = Math.max(-0.06, Math.min(0.06, carryRate - baselineRate));
-        const teamUplift = Math.max(-0.06, Math.min(0.06, winRate - baselineRate));
         const enemyRates = enemyIds.map((enemyId, index) => { const stat = individualEnemyMaps[index].get(item.id); const rate = adjustedRate(stat); return stat ? { heroId: enemyId, rate, matches: stat.matches, lift: rate - baselineRate } : null; }).filter((entry): entry is EnemyItemRate => Boolean(entry)).sort((a, b) => b.lift - a.lift);
-        return { item, carryScore: (carryRate * .65 + winRate * .15 + baselineRate * .2 + carryUplift * .35) * carryConfidence, teamScore: (winRate * .7 + carryRate * .1 + baselineRate * .2 + teamUplift * .35) * teamConfidence, teamRate: winRate, baselineRate, carryRate, carryMatches: carry.matches, teamMatches: team.matches, carryBuyTime: carry.avg_buy_time_s, teamBuyTime: team.avg_buy_time_s, enemyRates } satisfies Recommendation;
-      }).filter((value): value is Recommendation => Boolean(value)));
+        return { item, carryScore: (carryRate * .65 + winRate * .15 + baselineRate * .2 + carryUplift * .35) * carryConfidence + baselineRate * (1 - carryConfidence), teamScore: 0, teamRate: winRate, baselineRate, carryRate, carryMatches, teamMatches: Math.max(team?.matches ?? 0, ...enemyRates.map((rate) => rate.matches)), exactMatches: team?.matches ?? 0, carryBuyTime: carry?.avg_buy_time_s ?? carryItemEvidence?.avg_buy_time_s ?? base?.avg_buy_time_s ?? 0, teamBuyTime: team?.avg_buy_time_s ?? base?.avg_buy_time_s ?? 0, enemyRates } satisfies Recommendation;
+      }).filter((value): value is Recommendation => Boolean(value));
+      const liveOwn = desktopLiveMatch?.players.find((player) => player.account_id != null && player.account_id === desktopLiveMatch.account_id);
+      const liveEnemies = desktopLiveMatch?.players.filter((player) => liveOwn?.team != null && player.team != null && player.team !== liveOwn.team && player.hero_id != null) ?? [];
+      const statlocker = await fetchStatlockerProfiles(liveEnemies.flatMap((player) => player.account_id == null ? [] : [player.account_id]));
+      if (runId !== analysisRunRef.current) return;
+      setStatlockerStatus(statlocker.status);
+      const ppByAccount = new Map(statlocker.profiles.map((profile) => [profile.accountId, profile.ppScore]));
+      const liveByHero = new Map(liveEnemies.map((player) => [player.hero_id!, player]));
+      const threatInputs = enemyIds.map((enemyId) => {
+        const player = liveByHero.get(enemyId);
+        return { heroId: enemyId, netWorth: player?.net_worth, soulsPerMinute: desktopLiveMatch?.game_time_s && player?.net_worth != null ? player.net_worth / Math.max(1, desktopLiveMatch.game_time_s / 60) : null, kills: player?.kills, deaths: player?.deaths, assists: player?.assists, statlockerPP: player?.account_id == null ? null : ppByAccount.get(player.account_id) ?? null };
+      });
+      const currentThreats = scoreThreats(threatInputs, desktopLiveMatch?.game_time_s ?? null);
+      const weightedThreatProfile = currentThreats.reduce((all, threat) => {
+        Object.entries(threatsForHero(threat.heroId)).forEach(([tag, strength]) => { all[tag] = (all[tag] ?? 0) + (strength ?? 0) * threat.weight; });
+        return all;
+      }, {} as Record<string, number>);
+      const ranked = rankItems(calculated.map((entry) => {
+        const flow = flowResult[0].status === "fulfilled" ? flowResult[0].value : null;
+        const core = flowCoreFit(flow, entry.item.id, 0);
+        const itemThreats = { ...threats, healing: threats.healing || lifestealDetected };
+        const mechanicFit = Math.max(counterCapability(entry.item.class_name, weightedThreatProfile), tagMatchesManualThreat(entry.item.class_name, itemThreats) ? 0.72 : 0);
+        const preferenceFit = (buildStyle === "safe" && entry.item.item_slot_type === "vitality") ||
+          (buildStyle === "greedy" && (entry.item.cost ?? 0) >= 3200) ||
+          (matchState === "behind" && entry.item.item_slot_type === "vitality") ||
+          (matchState === "ahead" && (entry.item.item_slot_type === "weapon" || entry.item.item_slot_type === "spirit")) ? 1 : 0;
+        return {
+          itemId: entry.item.id, baselineRate: entry.baselineRate, coreRate: core?.rate ?? null,
+          coreMatches: core?.matches ?? 0, exactRate: entry.teamRate, exactMatches: entry.exactMatches,
+          averageBuyTimeSeconds: entry.teamBuyTime || null,
+          mechanicFit, preferenceFit,
+          enemyRates: entry.enemyRates.map((rate) => ({ heroId: rate.heroId, rate: rate.rate, matches: rate.matches })),
+        };
+      }),
+        threatInputs, desktopLiveMatch?.game_time_s ?? null);
+      const rankedById = new Map(ranked.map((entry) => [entry.itemId, entry]));
+      const carryThreats = threatInputs.filter((enemy) => enemy.heroId === carryId);
+      const carryRanked = rankItems(calculated.map((entry) => {
+        const core = flowCoreFit(flowResult[0].status === "fulfilled" ? flowResult[0].value : null, entry.item.id, 0);
+        return { itemId: entry.item.id, baselineRate: entry.baselineRate, coreRate: core?.rate ?? null, coreMatches: core?.matches ?? 0,
+          exactRate: null, exactMatches: 0, averageBuyTimeSeconds: entry.carryBuyTime || null,
+          mechanicFit: Math.max(counterCapability(entry.item.class_name, threatsForHero(carryId)), tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected }) ? 0.72 : 0),
+          preferenceFit: buildStyle === "safe" && entry.item.item_slot_type === "vitality" ? 1 : buildStyle === "greedy" && (entry.item.cost ?? 0) >= 3200 ? 1 : 0,
+          enemyRates: entry.enemyRates.filter((rate) => rate.heroId === carryId).map(({ heroId, rate, matches }) => ({ heroId, rate, matches })) };
+      }), carryThreats, desktopLiveMatch?.game_time_s ?? null);
+      const carryRankedById = new Map(carryRanked.map((entry) => [entry.itemId, entry]));
+      setRecommendations(calculated.map((entry) => { const scored = rankedById.get(entry.item.id); const carryScored = carryRankedById.get(entry.item.id); const advisorReason = scored?.reason.replace(/Hero #(\d+)/g, (_match, id: string) => heroMap.get(Number(id))?.name ?? `Hero #${id}`); return { ...entry, carryScore: carryScored?.score ?? 0, teamScore: scored?.score ?? 0, advisorReason, coreFit: scored?.coreFit, counterFit: scored?.counterFit, mechanicFit: scored?.mechanicFit, exactFit: scored?.exactFit, threatTargets: scored?.threatTargets }; }));
       setAllCounterStats(counterStats);
       setLaneCounterStats(laneStats);
       setMatchup(counterStats.find((stat) => stat.hero_id === heroId && stat.enemy_hero_id === carryId) ?? null);
       setUpdatedAt(new Date());
-    } catch { if (runId === analysisRunRef.current) setError(copy[lang].statsError); }
+    } catch (error) { console.warn("Counterlock analysis failed; inspect Deadlock API responses and match inputs.", error); if (runId === analysisRunRef.current) setError(copy[lang].statsError); }
     finally { if (runId === analysisRunRef.current) setLoading(false); }
-  }, [carryId, dataWindow, enemyIds, heroId, items, laneOnly, lang, queueMode]);
+  }, [buildStyle, carryId, dataWindow, desktopLiveMatch, enemyIds, heroId, heroMap, items, laneOnly, lang, lifestealDetected, matchState, queueMode, threats]);
 
   useEffect(() => {
     if (!desktopAvailable()) return;
@@ -656,25 +740,8 @@ export default function Home() {
     desktopBuildRef.current = build;
   }, [desktopStatus?.build_id, analyze]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- starts asynchronous data analysis when inputs become ready
   useEffect(() => { if (items.length && enemyIds.length) void analyze(); }, [analyze, enemyIds.length, items.length]);
-
-  const enemyBuildInsights = useMemo(() => enemyBuildSignals.map((signal) => ({ ...signal, items: signal.stats.map((stat) => ({ stat, item: items.find((item) => item.id === stat.item_id) })).filter((entry): entry is { stat: ItemStat; item: Item } => Boolean(entry.item)) })), [enemyBuildSignals, items]);
-  const lifestealDetected = useMemo(() => enemyBuildInsights.some((signal) => signal.items.some(({ item }) => /lifesteal|leech|healingbooster|restorative|siphon/.test(normalizeText(`${item.name}${item.class_name ?? ""}`)))), [enemyBuildInsights]);
-
-  const contextBoost = useCallback((entry: Recommendation) => {
-    const name = normalizeText(`${entry.item.name} ${entry.item.class_name ?? ""}`);
-    const has = (...terms: string[]) => terms.some((term) => name.includes(term));
-    let boost = 0;
-    if (buildStyle === "safe") boost += entry.item.item_slot_type === "vitality" ? .018 : 0;
-    if (buildStyle === "greedy") boost += (entry.item.cost ?? 0) >= 3200 ? .014 : 0;
-    if (matchState === "behind") boost += entry.item.item_slot_type === "vitality" ? .02 : 0;
-    if (matchState === "ahead") boost += entry.item.item_slot_type === "weapon" || entry.item.item_slot_type === "spirit" ? .01 : 0;
-    if ((threats.healing || lifestealDetected) && has("healbane", "toxic", "decay", "silencer")) boost += .05;
-    if (threats.weapon && has("bulletarmor", "metalskin", "reactivebarrier", "fortitude")) boost += .04;
-    if (threats.spirit && has("spiritarmor", "divinebarrier", "improvedspirit", "debuffreducer")) boost += .04;
-    if (threats.crowdControl && has("debuffreducer", "unstoppable", "etherealshift", "divinebarrier")) boost += .04;
-    return boost;
-  }, [buildStyle, lifestealDetected, matchState, threats]);
 
   function updateContext(action: () => void) { action(); setSortMode("recommended"); }
 
@@ -682,31 +749,60 @@ export default function Home() {
     const [start, end] = phaseRanges[phase];
     const values = (entry: Recommendation) => buyTarget === "team" ? { rate: entry.teamRate, matches: entry.teamMatches, buyTime: entry.teamBuyTime, score: entry.teamScore } : { rate: entry.carryRate, matches: entry.carryMatches, buyTime: entry.carryBuyTime, score: entry.carryScore };
     const filtered = recommendations.filter((entry) => { const value = values(entry); return value.buyTime >= start && value.buyTime <= end && value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
-    return filtered.sort((a, b) => { const av = values(a), bv = values(b); return sortMode === "buytime" ? av.buyTime - bv.buyTime : sortMode === "winrate" ? bv.rate - av.rate : sortMode === "sample" ? bv.matches - av.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : (bv.score + contextBoost(b)) - (av.score + contextBoost(a)); }).slice(0, resultCount);
-  }, [buyTarget, category, contextBoost, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
+    return filtered.sort((a, b) => { const av = values(a), bv = values(b); return sortMode === "buytime" ? av.buyTime - bv.buyTime : sortMode === "winrate" ? bv.rate - av.rate : sortMode === "sample" ? bv.matches - av.matches : sortMode === "cost" ? (a.item.cost ?? 0) - (b.item.cost ?? 0) : bv.score - av.score; }).slice(0, resultCount);
+  }, [buyTarget, category, itemTier, maxBudget, minSample, phase, positiveLiftOnly, recommendations, resultCount, sortMode]);
+
+  const allOwnedItemIds = useMemo(() => Array.from(new Set([
+    ...ownedItemIds,
+    ...(desktopStatus?.in_game && desktopAdvice?.inventory_known && desktopAdvice.match_id === desktopLiveMatch?.match_id ? desktopOwnedItemIds : []),
+  ])), [desktopAdvice?.inventory_known, desktopAdvice?.match_id, desktopLiveMatch?.match_id, desktopOwnedItemIds, desktopStatus?.in_game, ownedItemIds]);
 
   const fullBuildPlan = useMemo(() => {
     const values = (entry: Recommendation) => buyTarget === "team" ? { rate: entry.teamRate, matches: entry.teamMatches, buyTime: entry.teamBuyTime, score: entry.teamScore } : { rate: entry.carryRate, matches: entry.carryMatches, buyTime: entry.carryBuyTime, score: entry.carryScore };
-    const pool = recommendations.filter((entry) => { const value = values(entry); return value.matches >= minSample && (category === "all" || entry.item.item_slot_type === category) && (!maxBudget || (entry.item.cost ?? 0) <= maxBudget) && (!itemTier || entry.item.item_tier === itemTier) && (!positiveLiftOnly || value.rate > entry.baselineRate); });
-    const used = new Set<number>();
-    const take = (matchesPhase: (entry: Recommendation, buyTime: number) => boolean, count: number) => pool.filter((entry) => !used.has(entry.item.id) && matchesPhase(entry, values(entry).buyTime)).sort((a, b) => (values(b).score + contextBoost(b)) - (values(a).score + contextBoost(a))).slice(0, count).sort((a, b) => values(a).buyTime - values(b).buyTime).map((entry) => { used.add(entry.item.id); return entry; });
-    const early = take((entry, buyTime) => buyTime < 720 || (entry.item.item_tier ?? 0) === 1, 6);
-    const mid = take((entry, buyTime) => (buyTime >= 600 && buyTime < 1260) || (entry.item.item_tier ?? 0) === 2, 5);
-    let late = take((entry, buyTime) => buyTime >= 1080 || (entry.item.item_tier ?? 0) >= 3, 5);
-    if (late.length < 5) late = [...late, ...take((entry) => (entry.item.item_tier ?? 0) >= 2, 5 - late.length)];
-    const rankedPool = [...pool].sort((a, b) => (values(b).score + contextBoost(b)) - (values(a).score + contextBoost(a)));
-    const missing = Math.max(0, 16 - early.length - mid.length - late.length);
-    if (missing) late = [...late, ...take(() => true, missing)];
-    const purchaseOrder = [...early, ...mid, ...late];
-    const weapon = purchaseOrder.filter((entry) => entry.item.item_slot_type === "weapon").slice(0, 4);
-    const vitality = purchaseOrder.filter((entry) => entry.item.item_slot_type === "vitality").slice(0, 4);
-    const spirit = purchaseOrder.filter((entry) => entry.item.item_slot_type === "spirit").slice(0, 4);
-    const lockedInventory = new Set([...weapon, ...vitality, ...spirit].map((entry) => entry.item.id));
-    const flex = purchaseOrder.filter((entry) => !lockedInventory.has(entry.item.id));
-    const upgrades = [...late, ...mid].filter((entry) => (entry.item.cost ?? 0) >= 3200);
-    const sellSuggestions = early.filter((entry) => (entry.item.cost ?? 0) <= 1600).map((sell) => ({ sell, replacement: upgrades.find((upgrade) => upgrade.item.item_slot_type === sell.item.item_slot_type) })).filter((entry): entry is { sell: Recommendation; replacement: Recommendation } => Boolean(entry.replacement)).slice(0, 3);
-    return { early, mid, late, weapon, vitality, spirit, flex, purchaseOrder, sellSuggestions, values };
-  }, [buyTarget, category, contextBoost, itemTier, maxBudget, minSample, positiveLiftOnly, recommendations]);
+    // Build planning is independent of the user's presentation filters.
+    const pool = recommendations;
+    const itemComponents = buildUpgradeGraph(items);
+    const allowedIds = new Set(pool.map((entry) => entry.item.id));
+    const planningCandidates: PlanCandidate[] = recommendations.map((entry) => ({ itemId: entry.item.id, score: values(entry).score,
+      buyTime: values(entry).buyTime || null, tier: entry.item.item_tier, cost: entry.item.cost, category: entry.item.item_slot_type,
+      counterUrgency: Math.max(entry.mechanicFit ?? 0, entry.counterFit ?? 0), coreFit: entry.coreFit ?? 0,
+      mechanicFit: entry.mechanicFit ?? 0, components: itemComponents.get(entry.item.id) ?? [], owned: allOwnedItemIds.includes(entry.item.id) }));
+    const flow = bestFlowPath(itemFlow, 4);
+    const flowSet = new Set(flow);
+    const pathCandidates = planningCandidates.filter((entry) => allowedIds.has(entry.itemId));
+    const nextBuyOrder = rankNextBuys(pathCandidates.map((entry) => ({ ...entry, pathSynergy: flowSet.has(entry.itemId) ? 0.08 : 0, timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - gameMinute * 60) / 900), opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 })));
+    const nextBuyScores = new Map(nextBuyOrder.map((entry) => [entry.itemId, entry.nextBuyScore]));
+    const pathIds = planPurchasePath(pathCandidates, itemFlow, 16);
+    const priorityIds = [...new Set([...nextBuyOrder.slice(0, 1).map((entry) => entry.itemId), ...pathIds])].slice(0, 16);
+    const purchaseOrder = priorityIds.flatMap((id) => { const entry = pool.find((candidate) => candidate.item.id === id); return entry ? [entry] : []; });
+    const early = purchaseOrder.filter((entry) => values(entry).buyTime < 720 || (entry.item.item_tier ?? 0) === 1);
+    const mid = purchaseOrder.filter((entry) => !early.includes(entry) && (values(entry).buyTime < 1260 || (entry.item.item_tier ?? 0) === 2));
+    const late = purchaseOrder.filter((entry) => !early.includes(entry) && !mid.includes(entry));
+    const entriesById = new Map(recommendations.map((entry) => [entry.item.id, entry]));
+    // Final inventory includes confirmed manual ownership; future purchases do not.
+    const slots = optimizeSlots(recommendations.flatMap((entry) => entry.item.item_slot_type ? [{ id: entry.item.id, category: entry.item.item_slot_type, score: values(entry).score + (allOwnedItemIds.includes(entry.item.id) ? 0.08 : 0), components: itemComponents.get(entry.item.id) }] : []));
+    const weapon = slots.fixed.filter((slot) => slot.category === "weapon").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
+    const vitality = slots.fixed.filter((slot) => slot.category === "vitality").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
+    const spirit = slots.fixed.filter((slot) => slot.category === "spirit").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
+    const flex = slots.flex.map((slot) => entriesById.get(slot.id)!).filter(Boolean);
+    const decisions = findSellDecisions(planningCandidates, purchaseOrder.map((entry) => entry.item.id));
+    const sellSuggestions = decisions.flatMap((decision) => { const sell = recommendations.find((entry) => entry.item.id === decision.sellId); const replacement = recommendations.find((entry) => entry.item.id === decision.replacementId); return sell && replacement ? [{ sell, replacement, reason: decision.reason }] : []; }).slice(0, 3);
+    const adaptiveCounters = purchaseOrder.filter((entry) => (entry.mechanicFit ?? 0) > 0 || (entry.counterFit ?? 0) >= 0.012).slice(0, 5);
+    const adaptiveIds = new Set(adaptiveCounters.map((entry) => entry.item.id));
+    const corePath = purchaseOrder.filter((entry) => !adaptiveIds.has(entry.item.id)).slice(0, 6);
+    const situational = recommendations.filter((entry) => tagsForItem(entry.item.class_name).length > 0 && !(entry.mechanicFit ?? 0) && !tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected })).slice(0, 4);
+    return { early, mid, late, weapon, vitality, spirit, flex, purchaseOrder, corePath, adaptiveCounters, situational, sellSuggestions, values,
+      nextBuyOrder: nextBuyOrder.map((entry) => ({ itemId: entry.itemId, nextBuyScore: entry.nextBuyScore })), nextBuyScores };
+  }, [allOwnedItemIds, buildStyle, buyTarget, gameMinute, itemFlow, items, lifestealDetected, recommendations, threats]);
+
+  useEffect(() => {
+    if (!desktopAvailable() || !recommendations.length || !heroId || !enemyIds.length) return;
+    const nextBuyScores = new Map(fullBuildPlan.nextBuyOrder.map((entry) => [entry.itemId, entry.nextBuyScore]));
+    void setAdvisorEvidence({ hero_id: heroId, enemy_ids: enemyIds, item_catalog: items.filter((item) => item.class_name && item.item_slot_type && item.cost != null).map((item) => ({ item_id: item.id, class_name: item.class_name! })), items: recommendations.filter((entry) => entry.item.cost != null && !allOwnedItemIds.includes(entry.item.id)).map((entry) => ({
+      item_id: entry.item.id, name: entry.item.name, cost: entry.item.cost!, score: nextBuyScores.get(entry.item.id) ?? entry.teamScore,
+      reason: entry.advisorReason ?? "Weighted individual matchups and hero baseline.",
+    })) });
+  }, [recommendations, heroId, enemyIds, allOwnedItemIds, fullBuildPlan, items]);
 
   const counterPicks = useMemo<CounterPick[]>(() => {
     if (!allCounterStats.length || !enemyIds.length) return [];
@@ -731,11 +827,11 @@ export default function Home() {
   }, [allCounterStats, carryId, enemyIds, heroes]);
   const nextBuy = desktopStatus?.in_game
     ? recommendations.find((entry) => entry.item.id === desktopAdvice?.recommended?.item_id)
-    : visibleRecommendations.find((entry) => !ownedItemIds.includes(entry.item.id));
+    : visibleRecommendations.find((entry) => !allOwnedItemIds.includes(entry.item.id));
   const liveAdvice = desktopStatus?.in_game ? desktopAdvice?.recommended : null;
   const activeAlerts = [lifestealDetected ? t.lifestealDetected : null, threats.healing ? t.alertHealing : null, threats.weapon ? t.alertWeapon : null, threats.spirit ? t.alertSpirit : null, threats.crowdControl ? t.alertCrowdControl : null].filter((alert): alert is NonNullable<typeof alert> => alert !== null);
   const fullBuildCost = fullBuildPlan.purchaseOrder.reduce((sum, entry) => sum + (entry.item.cost ?? 0), 0);
-  const remainingBuildCost = fullBuildPlan.purchaseOrder.filter((entry) => !ownedItemIds.includes(entry.item.id)).reduce((sum, entry) => sum + (entry.item.cost ?? 0), 0);
+  const remainingBuildCost = fullBuildPlan.purchaseOrder.filter((entry) => !allOwnedItemIds.includes(entry.item.id)).reduce((sum, entry) => sum + (entry.item.cost ?? 0), 0);
   const selectedEnemyInsight = selectedEnemySignal ? enemyBuildInsights.find((signal) => signal.heroId === selectedEnemySignal.heroId) : null;
 
   const filteredHeroes = useMemo(() => {
@@ -1032,7 +1128,7 @@ export default function Home() {
       {patchOpen && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
 
       {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} advice={desktopAdvice} onOpenBuild={() => setDesktopTab("build")} />}
-      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={ownedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} />}
+      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={desktopAdvice} recommendations={recommendations} />}
       {desktopStatus && desktopTab === "system" && <section className="desktop-system-page" aria-label="System diagnostics"><div className="desktop-system-heading"><small>COUNTERLOCK / SYSTEM</small><h1>System & diagnostics</h1><p>Runtime details and local desktop preferences.</p></div><div className="desktop-system-grid">
         <article><h2>Game connection</h2><dl><div><dt>Deadlock</dt><dd>{desktopStatus.game_running ? "Running" : "Not running"}</dd></div><div><dt>Process ID</dt><dd>{desktopStatus.pid ?? "—"}</dd></div><div><dt>Steam build</dt><dd>{desktopStatus.build_id ?? "Unknown"}</dd></div><div><dt>Live source</dt><dd>{desktopStatus.provider}</dd></div><div><dt>Console phase</dt><dd>{desktopStatus.console_phase ?? "No verified event"}</dd></div><div><dt>Match ID</dt><dd>{desktopStatus.match_id ?? "Unavailable"}</dd></div><div><dt>Inventory</dt><dd>{desktopStatus.capabilities.items ? "Available" : "Not available"}</dd></div><div><dt>Install path</dt><dd>{desktopStatus.installation_path ?? "Not detected"}</dd></div></dl>{desktopStatus.last_error && <p className="desktop-system-error">{desktopStatus.last_error}</p>}{desktopLastMatch && <p className="desktop-system-note">Last match: {desktopLastMatch.match_id ?? "ID unknown"} · {desktopLastMatch.source}</p>}</article>
         <article><h2>Desktop settings</h2><label><input type="checkbox" checked={desktopPreferences?.close_to_tray ?? true} onChange={(event) => void updateDesktopPreferences({ close_to_tray: event.target.checked })} />{lang === "de" ? "Beim Schließen im Tray weiterlaufen" : "Keep running in tray when closing"}</label><label><input type="checkbox" checked={desktopPreferences?.compact_always_on_top ?? true} onChange={(event) => void updateDesktopPreferences({ compact_always_on_top: event.target.checked })} />{lang === "de" ? "Kompaktfenster immer im Vordergrund" : "Keep compact window always on top"}</label><p>Game memory is read locally. Screenshots and unspent shop balance are separate capabilities.</p><hr /><h2>{lang === "de" ? "Software-Updates" : "Software updates"}</h2><button type="button" disabled={updateBusy} onClick={() => void checkDesktopUpdates()}>{updateBusy ? (lang === "de" ? "BITTE WARTEN …" : "PLEASE WAIT…") : (lang === "de" ? "NACH UPDATES SUCHEN" : "CHECK FOR UPDATES")}</button>{updateStatus && <p role="status">{updateStatus}</p>}</article>
@@ -1163,7 +1259,7 @@ export default function Home() {
       {overlayOpen && <aside className="match-overlay" role="dialog" aria-modal="true" aria-label={t.overlay}><button type="button" onClick={() => setOverlayOpen(false)}>{t.closeOverlay} ×</button><small>{t.nextBuy}</small>{nextBuy && <div><div className="overlay-icon">{nextBuy.item.shop_image_webp ? <img src={nextBuy.item.shop_image_webp} alt="" /> : "◆"}</div><strong>{nextBuy.item.name}</strong><b>◈ {nextBuy.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</b></div>}{activeAlerts.length > 0 && <section><small>{t.counterAlerts}</small>{activeAlerts.map((alert) => <p key={alert}>⚠ {alert}</p>)}</section>}<section><small>{t.buildPath}</small><strong>{t[buildStyle]} · {t[matchState]}</strong></section></aside>}
       {selectedEnemyInsight && <aside className="enemy-detail-modal" role="dialog" aria-modal="true" aria-label={t.enemyDetails}><button type="button" onClick={() => setSelectedEnemySignal(null)}>{t.closeDetails} ×</button><div><HeroPortrait hero={heroMap.get(selectedEnemyInsight.heroId)} /><div><small>{t.enemyDetails}</small><h3>{heroMap.get(selectedEnemyInsight.heroId)?.name}</h3></div></div><small>{t.commonBuild}</small>{selectedEnemyInsight.items.map(({ item, stat }) => <article key={item.id}><div>{item.shop_image_webp ? <img src={item.shop_image_webp} alt="" /> : "◆"}</div><strong>{item.name}</strong><span>{formatMatches(stat.matches, lang)} {t.games}</span></article>)}</aside>}
 
-      <footer><div className="brand"><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a> {t.disclaimer}</p></footer>
+      <footer><div className="brand"><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a>{statlockerStatus === "connected" ? <> · <a href="https://statlocker.gg/" target="_blank" rel="noreferrer">Powered by Statlocker</a></> : <> · Statlocker: {statlockerStatus === "not_configured" ? (lang === "de" ? "nicht konfiguriert" : "not configured") : (lang === "de" ? "nicht verfügbar" : "unavailable")}</>} {t.disclaimer}</p></footer>
       </div>
 
       {allyPickerOpen && <div className="import-overlay hero-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="ally-picker-title">

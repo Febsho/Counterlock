@@ -6,7 +6,7 @@
 //! rather than a crash loop or a plausible-looking fabricated number.
 
 use super::mem::ProcessMemory;
-use crate::config::{EntityLayout, PlayerOffsets};
+use crate::config::{EntityLayout, PawnOffsets, PlayerOffsets};
 use crate::state::PlayerState;
 
 /// Individual Steam accounts all fall inside this Steam64 range, which makes a
@@ -88,6 +88,8 @@ pub fn read_player(
         deaths: counter(offsets.deaths),
         assists: counter(offsets.assists),
         net_worth: counter(offsets.net_worth),
+        unspent_souls: None,
+        owned_item_class_tokens: None,
         // Derived by MatchSnapshot::finalize once the match clock is known.
         souls_per_minute: None,
         // The reader does not walk the inventory yet.
@@ -104,6 +106,7 @@ pub fn collect_players(
     list: &EntityList<'_>,
     mem: &ProcessMemory,
     offsets: &PlayerOffsets,
+    pawn_offsets: &PawnOffsets,
     max_entities: u32,
 ) -> Vec<(u64, PlayerState)> {
     let mut players: Vec<(u64, PlayerState)> = Vec::with_capacity(12);
@@ -114,6 +117,23 @@ pub fn collect_players(
         let Some((steam_id, mut player)) = read_player(mem, entity, offsets) else {
             continue;
         };
+        if let (Some(handle_offset), Some(currency_offset)) =
+            (offsets.hero_pawn, pawn_offsets.currencies)
+        {
+            // Source 2 entity handles store the entity-list index in the low
+            // 15 bits; the remaining serial bits prevent stale references.
+            let handle = mem.read_u32(entity + handle_offset).ok().unwrap_or(0);
+            let pawn_index = handle & 0x7fff;
+            if pawn_index != 0 && pawn_index < 0x7fff {
+                if let Some(pawn) = list.entity(pawn_index) {
+                    player.unspent_souls = mem
+                        .read_u32(pawn + currency_offset + u64::from(pawn_offsets.gold_currency_index) * 4)
+                        .ok()
+                        .filter(|value| *value <= 1_000_000);
+                    player.owned_item_class_tokens = read_owned_item_tokens(mem, list, pawn, pawn_offsets);
+                }
+            }
+        }
         if steam_id != 0 && players.iter().any(|(seen, _)| *seen == steam_id) {
             continue;
         }
@@ -125,6 +145,34 @@ pub fn collect_players(
     }
     players.sort_by_key(|(_, player)| (player.team.unwrap_or(u8::MAX), player.slot));
     players
+}
+
+fn read_owned_item_tokens(
+    mem: &ProcessMemory,
+    list: &EntityList<'_>,
+    pawn: u64,
+    offsets: &PawnOffsets,
+) -> Option<Vec<u32>> {
+    let component = pawn.checked_add(offsets.ability_component?)?;
+    let vector = component.checked_add(offsets.abilities_vector?)?;
+    let count = mem.read_u32(vector).ok()?;
+    if count > 64 { return None; }
+    let data = mem.read_ptr(vector.checked_add(offsets.abilities_data?)?).ok().flatten()?;
+    let slot_offset = offsets.ability_slot?;
+    let token_offset = offsets.ability_subclass_id?;
+    let mut tokens = Vec::new();
+    for position in 0..count {
+        let handle = mem.read_u32(data + u64::from(position) * 4).ok()?;
+        let index = handle & 0x7fff;
+        if index == 0 || index >= 0x7fff { return None; }
+        let ability = list.entity(index)?;
+        let slot = mem.read_u32(ability + slot_offset).ok()?;
+        // Shop items occupy active slots 4-7; passive shop items use None (23).
+        if !(4..=7).contains(&slot) && slot != 23 { continue; }
+        let token = mem.read_u32(ability + token_offset).ok()?;
+        if token != 0 && !tokens.contains(&token) { tokens.push(token); }
+    }
+    Some(tokens)
 }
 
 #[cfg(test)]

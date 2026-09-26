@@ -34,6 +34,7 @@ pub struct Offsets {
     pub client: ClientOffsets,
     pub entity: EntityLayout,
     pub player: PlayerOffsets,
+    pub pawn: PawnOffsets,
     pub rules: RulesOffsets,
     /// Game-state names indexed by the engine's game-state enum value.
     /// Reorder to match the build you are on.
@@ -46,6 +47,7 @@ impl Default for Offsets {
             client: ClientOffsets::default(),
             entity: EntityLayout::default(),
             player: PlayerOffsets::default(),
+            pawn: PawnOffsets::default(),
             rules: RulesOffsets::default(),
             states: [
                 "Init",
@@ -155,6 +157,27 @@ pub struct PlayerOffsets {
     pub deaths: Option<u64>,
     /// `m_iAssists`
     pub assists: Option<u64>,
+    /// `m_hHeroPawn` entity handle on the controller.
+    pub hero_pawn: Option<u64>,
+}
+
+/// Fields on the locally controlled hero pawn. Only populated by exact-build profiles.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PawnOffsets {
+    /// `m_nCurrencies[0]` (`EGold`), the live unspent shop soul balance.
+    pub currencies: Option<u64>,
+    pub gold_currency_index: u8,
+    /// Embedded `CCitadelAbilityComponent` on the pawn.
+    pub ability_component: Option<u64>,
+    /// `m_vecAbilities` inside the ability component.
+    pub abilities_vector: Option<u64>,
+    /// Data pointer within `CNetworkUtlVectorBase<CHandle<...>>`.
+    pub abilities_data: Option<u64>,
+    /// `m_nSubclassID` on each ability entity.
+    pub ability_subclass_id: Option<u64>,
+    /// `m_eAbilitySlot` on each ability entity.
+    pub ability_slot: Option<u64>,
 }
 
 /// Field offsets inside the game-rules object (`cur_time` is in `CGlobalVars`).
