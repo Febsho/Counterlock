@@ -56,6 +56,8 @@ impl AttachedProvider {
     }
 
     /// Desktop mode never consults the public Watch-tab match list.
+    // Used by the desktop shell, while the standalone companion uses `new`.
+    #[allow(dead_code)]
     pub fn new_local_only(config: Config) -> Self {
         Self::with_fallback(config, false)
     }

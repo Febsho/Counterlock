@@ -47,6 +47,9 @@ impl GameProcessState {
 /// Detects whether Deadlock is running. Implemented per platform.
 pub trait ProcessDetector: Send {
     fn is_game_running(&mut self) -> bool;
+    // The desktop shell uses this through the shared companion module; the
+    // standalone companion binary only needs the running-state check.
+    #[allow(dead_code)]
     fn game_pid(&mut self) -> Option<u32> {
         None
     }
