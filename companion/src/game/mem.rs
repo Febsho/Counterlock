@@ -34,6 +34,12 @@ pub struct ProcessMemory {
     handle: windows_sys::Win32::Foundation::HANDLE,
 }
 
+// A Windows process handle is an OS-owned opaque value that may be used and
+// closed from any thread. ProcessMemory uniquely owns it, and moving this
+// wrapper transfers that ownership without duplicating or invalidating it.
+#[cfg(windows)]
+unsafe impl Send for ProcessMemory {}
+
 impl ProcessMemory {
     pub fn open(pid: u32) -> Result<Self> {
         #[cfg(unix)]
