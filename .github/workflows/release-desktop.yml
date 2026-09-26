@@ -60,8 +60,10 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: |
-            src-tauri/target/release/bundle/appimage/*
-            src-tauri/target/release/bundle/deb/*
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/deb/*.deb.sig
           if-no-files-found: error
       - name: Upload Windows bundles
         if: runner.os == 'Windows'
