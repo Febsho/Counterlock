@@ -8,7 +8,7 @@ localhost-only match-data API. Linux first; Windows supported.
 │  embedded UI (Next.js static export)               │
 │  HTTP server  127.0.0.1:9876                       │
 │  poll loop    process lifecycle + telemetry        │
-│  platform     Linux /proc  |  Windows Toolhelp     │
+│  platform     Linux /proc  |  Windows Toolhelp + process reads │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -137,8 +137,8 @@ roster-level: **per-player combat stats are not available from it.**
 ### The `attached` provider
 
 Optional and experimental; it is the only current provider that can report live combat stats. It opens
-`/proc/<pid>/mem` on the running client, follows the entity list and the
-game-rules object, and copies out the values the HUD already draws. It is
+`/proc/<pid>/mem` on Linux or uses the Windows read-only process API, follows
+the entity list and the game-rules object, and copies out the values the HUD already draws. It is
 **strictly read-only**: no writes, no injection, no hooks. Scope is limited to
 data this client already received — an external reader cannot surface
 information the server withheld, so it yields no information the scoreboard

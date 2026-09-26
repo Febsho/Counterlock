@@ -1,10 +1,13 @@
 export type SlotCandidate = { id: number; category: "weapon" | "vitality" | "spirit"; score: number; components?: number[] };
 
 /** Assign 4 fixed slots per category and 4 flex slots; upgraded components replace their base state. */
-export function optimizeSlots(candidates: SlotCandidate[], fixedPerCategory = 4, flexSlots = 4) {
+export function optimizeSlots(candidates: SlotCandidate[], fixedPerCategory = 4, flexSlots = 4, lockedIds: number[] = []) {
   const ranked = [...candidates].sort((a, b) => b.score - a.score || a.id - b.id);
-  const chosen: SlotCandidate[] = [];
+  const locked = new Set(lockedIds);
+  const lockedCandidates = ranked.filter((item) => locked.has(item.id) && !ranked.some((upgrade) => locked.has(upgrade.id) && (upgrade.components ?? []).includes(item.id)));
+  const chosen: SlotCandidate[] = [...lockedCandidates];
   const counts = { weapon: 0, vitality: 0, spirit: 0 };
+  for (const item of lockedCandidates) counts[item.category]++;
   for (const item of ranked) {
     if (chosen.some((current) => current.id === item.id) || chosen.some((current) => (current.components ?? []).includes(item.id))) continue;
     const components = chosen.filter((current) => (item.components ?? []).includes(current.id));

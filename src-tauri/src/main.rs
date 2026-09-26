@@ -7,7 +7,6 @@ mod capture;
 mod config;
 #[path = "game/console.rs"]
 mod console_local;
-#[cfg(unix)]
 #[path = "../../companion/src/game/mod.rs"]
 mod game;
 #[path = "game/hud.rs"]

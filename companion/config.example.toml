@@ -20,8 +20,9 @@ allowed_origins = []
 #   "attached"      optional experimental reader of the running game client.
 #                   The only source
 #                   that reports per-player KDA, souls and pause state. Needs
-#                   the offsets below and CAP_SYS_PTRACE; falls back to
-#                   "deadlock-api" whenever it cannot read the process.
+#                   the offsets below and OS read access to the process (Linux
+#                   may need CAP_SYS_PTRACE); falls back to "deadlock-api"
+#                   when it cannot read the process.
 #   "deadlock-api"  public Deadlock API (matches/active), roster-level only
 #                   for the legacy companion. The Tauri desktop never uses
 #                   this feed to identify your live match; it watches the
@@ -62,8 +63,9 @@ deadlock_api_base = "https://api.deadlock-api.com/v1"
 # Attached reader
 #
 # Only used when provider = "attached". The reader is strictly read-only: it
-# opens /proc/<pid>/mem, follows the entity list, and copies out the scoreboard
-# values the client already draws. It never writes to the process.
+# reads /proc/<pid>/mem on Linux or uses ReadProcessMemory on Windows, follows
+# the entity list, and copies out scoreboard values the client already draws.
+# It never writes to the process.
 #
 # Reading another process's memory is detectable by anti-cheat and is against
 # Deadlock's terms of service. Set provider = "deadlock-api" to avoid it.

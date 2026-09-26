@@ -15,12 +15,14 @@ export type PlanCandidate = {
   owned: boolean;
 };
 
+export const NEXT_BUY_WEIGHTS = { liveValue: 0.25, counter: 0.45, core: 0.1, timing: 0.05, path: 0.08, affordability: 0.07 } as const;
+
 export type SellDecision = { sellId: number; replacementId: number; gain: number; reason: "upgrade_obsolete" | "slot_pressure" | "replacement_gain" };
 
 /** Rank next purchases by current marginal value; time only nudges the result. */
-export function rankNextBuys<T extends { score: number; counterUrgency?: number; coreFit?: number; timingFit?: number; pathSynergy?: number; opportunityCost?: number; owned?: boolean }>(items: T[]) {
+export function rankNextBuys<T extends { score: number; counterUrgency?: number; coreFit?: number; timingFit?: number; pathSynergy?: number; affordabilityUtility?: number; opportunityCost?: number; redundancyPenalty?: number; owned?: boolean }>(items: T[]) {
   return items.filter((item) => !item.owned).map((item) => ({ ...item, nextBuyScore:
-    item.score + (item.counterUrgency ?? 0) * 0.35 + (item.coreFit ?? 0) * 0.12 + (item.timingFit ?? 0) * 0.04 + (item.pathSynergy ?? 0) * 0.08 - (item.opportunityCost ?? 0),
+    item.score * NEXT_BUY_WEIGHTS.liveValue + (item.counterUrgency ?? 0) * NEXT_BUY_WEIGHTS.counter + (item.coreFit ?? 0) * NEXT_BUY_WEIGHTS.core + (item.timingFit ?? 0) * NEXT_BUY_WEIGHTS.timing + (item.pathSynergy ?? 0) * NEXT_BUY_WEIGHTS.path + (item.affordabilityUtility ?? 0) * NEXT_BUY_WEIGHTS.affordability - (item.opportunityCost ?? 0) - (item.redundancyPenalty ?? 0),
   })).sort((a, b) => b.nextBuyScore - a.nextBuyScore);
 }
 

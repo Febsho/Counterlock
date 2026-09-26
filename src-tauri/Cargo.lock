@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "counterlock-desktop"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "image",
@@ -432,6 +432,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

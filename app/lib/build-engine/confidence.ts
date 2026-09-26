@@ -4,6 +4,11 @@ export function sampleConfidence(matches: number, halfTrustAt = 400): number {
   return matches / (matches + halfTrustAt);
 }
 
+/** Smoothly blend exact-lineup evidence in without a hard sample-count cliff. */
+export function exactLineupConfidence(matches: number): number {
+  return sampleConfidence(matches, 800);
+}
+
 export function shrinkLift(lift: number, matches: number, cap = 0.08): number {
   if (!Number.isFinite(lift)) return 0;
   return Math.max(-cap, Math.min(cap, lift)) * sampleConfidence(matches);

@@ -7,7 +7,6 @@
 mod assets;
 mod capture;
 mod config;
-#[cfg(unix)]
 mod game;
 mod logging;
 mod platform;

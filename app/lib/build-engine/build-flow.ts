@@ -32,3 +32,10 @@ export function flowCoreFit(flow: ItemFlowStats | null, itemId: number, phase: n
   const node = flow?.nodes.find((candidate) => candidate.item_id === itemId && candidate.column === phase);
   return node ? { rate: node.adjusted_win_rate, matches: node.matches, phase: node.column } : null;
 }
+
+export function itemFlowPhase(gameTimeSeconds: number | null): number {
+  if (gameTimeSeconds == null || !Number.isFinite(gameTimeSeconds) || gameTimeSeconds < 9 * 60) return 0;
+  if (gameTimeSeconds < 20 * 60) return 1;
+  if (gameTimeSeconds < 30 * 60) return 2;
+  return 3;
+}

@@ -7,14 +7,14 @@ import { DesktopBuildLab } from "./DesktopBuildLab";
 import { cachedJson } from "./lib/data/cache";
 import { rankItems } from "./lib/build-engine/scoring";
 import { itemFlowStats, itemStatsUrl } from "./lib/data/deadlock-api";
-import { bestFlowPath, flowCoreFit } from "./lib/build-engine/build-flow";
+import { bestFlowPath, flowCoreFit, itemFlowPhase } from "./lib/build-engine/build-flow";
 import { counterCapability, tagsForItem, tagMatchesManualThreat } from "./lib/build-engine/counter-tags";
 import { threatsForHero } from "./lib/build-engine/hero-threats";
 import { scoreThreats } from "./lib/build-engine/threat-score";
 import { buildUpgradeGraph } from "./lib/build-engine/upgrade-graph";
 import { optimizeSlots } from "./lib/build-engine/slot-optimizer";
 import { findSellDecisions, planPurchasePath, rankNextBuys, type PlanCandidate } from "./lib/build-engine/planner";
-import { fetchStatlockerProfiles, type StatlockerStatus } from "./lib/data/statlocker";
+import { fetchStatlockerProfiles, type StatlockerProfile, type StatlockerStatus } from "./lib/data/statlocker";
 
 const API = "https://api.deadlock-api.com/v1";
 
@@ -44,7 +44,7 @@ type ItemStat = { item_id: number; wins: number; losses: number; matches: number
 type EnemyBuildSignal = { heroId: number; stats: ItemStat[] };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
-type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; exactMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[]; advisorReason?: string; coreFit?: number; counterFit?: number; mechanicFit?: number; exactFit?: number; threatTargets?: number[] };
+type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; exactMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[]; advisorReason?: string; coreFit?: number; counterFit?: number; counterUrgency?: number; mechanicFit?: number; exactFit?: number; threatTargets?: number[] };
 type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all">; isOwn?: boolean; playerName?: string };
 type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
 type ScoreboardSheet = { canvas: HTMLCanvasElement; rowHeight: number };
@@ -361,6 +361,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [statlockerStatus, setStatlockerStatus] = useState<StatlockerStatus>("not_configured");
+  const [liveProfiles, setLiveProfiles] = useState<Record<number, StatlockerProfile>>({});
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
@@ -390,6 +391,23 @@ export default function Home() {
   const [updateBusy, setUpdateBusy] = useState(false);
   const [desktopMonitors, setDesktopMonitors] = useState<DesktopMonitor[]>([]);
   const [desktopMonitorIndex, setDesktopMonitorIndex] = useState(0);
+  const effectiveGameTimeSeconds = desktopStatus?.in_game && desktopLiveMatch?.game_time_s != null ? desktopLiveMatch.game_time_s : gameMinute * 60;
+  const profileRosterKey = desktopLiveMatch?.players.map((player) => player.account_id).filter((id): id is number => id != null).sort((a, b) => a - b).filter((id, index, ids) => index === 0 || id !== ids[index - 1]).join(",") ?? "";
+  const playerProfiles = useMemo(() => savedSteamProfile ? { ...liveProfiles, [savedSteamProfile.account_id]: liveProfiles[savedSteamProfile.account_id] ?? { accountId: savedSteamProfile.account_id, name: savedSteamProfile.personaname, avatarUrl: savedSteamProfile.avatar || null, ppScore: null, estimatedRankNumber: null, region: null } } : liveProfiles, [liveProfiles, savedSteamProfile]);
+
+  useEffect(() => {
+    if (!profileRosterKey) return;
+    let active = true;
+    const ids = profileRosterKey.split(",").map(Number);
+    const load = () => void fetchStatlockerProfiles(ids).then((result) => {
+        if (!active) return;
+        setLiveProfiles((current) => ({ ...current, ...Object.fromEntries(result.profiles.map((profile) => [profile.accountId, profile])) }));
+        setStatlockerStatus(result.status);
+      }).catch(() => { /* profile enrichment never blocks a live match */ });
+    load();
+    const timer = window.setInterval(load, 15 * 60_000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [profileRosterKey]);
   const [importerOpen, setImporterOpen] = useState(false);
   const [importTarget, setImportTarget] = useState<ImportTarget>("enemy");
   const [screenshotUrl, setScreenshotUrl] = useState("");
@@ -400,11 +418,15 @@ export default function Home() {
   const [selectedDetections, setSelectedDetections] = useState<number[]>([]);
   const enemyRosterRef = useRef<HTMLDivElement>(null);
   const analysisRunRef = useRef(0);
+  const analysisContextRef = useRef<string | null>(null);
+  const analysisTriggerRef = useRef<string | null>(null);
   const companionMatchRef = useRef<number | null>(null);
   const companionCaptureRef = useRef<number | null>(null);
   const companionRosterRef = useRef<number | null>(null);
   const desktopBuildRef = useRef<string | null>(null);
   const desktopRosterKeyRef = useRef<string | null>(null);
+  const desktopSnapshotRef = useRef<DesktopMatch | null>(null);
+  const desktopSnapshotGapRef = useRef<number | null>(null);
   const t = copy[lang];
   const phase: Phase = gameMinute < 11 ? "early" : gameMinute < 21 ? "mid" : "late";
 
@@ -413,6 +435,9 @@ export default function Home() {
   }, [enemyPickerOpen]);
 
   const heroMap = useMemo(() => new Map(heroes.map((hero) => [hero.id, hero])), [heroes]);
+  const liveThreatSignalKey = desktopLiveMatch?.players.filter((player) => enemyIds.includes(player.hero_id ?? -1)).map((player) => [player.hero_id, player.net_worth == null ? null : Math.floor(player.net_worth / 1500), player.kills, player.deaths, player.assists].join(":")).join("|") ?? "manual";
+  const profileSignalKey = Object.values(playerProfiles).map((profile) => `${profile.accountId}:${profile.ppScore ?? ""}:${profile.estimatedRankNumber ?? ""}`).sort().join("|");
+  const analysisInputKey = JSON.stringify({ heroId, enemies: enemyIds, carryId, dataWindow, queueMode, laneOnly, phase: itemFlowPhase(effectiveGameTimeSeconds), timeWindow: Math.floor(effectiveGameTimeSeconds / 300), liveThreatSignalKey, profileSignalKey, threats, buildStyle, matchState, heroCount: heroMap.size, itemCount: items.length });
   const ownHero = heroMap.get(heroId);
   const carryHero = heroMap.get(carryId);
   const allyTeamIds = useMemo(() => [heroId, ...allyIds], [allyIds, heroId]);
@@ -536,17 +561,48 @@ export default function Home() {
     };
     const applySnapshot = (snapshot: DesktopMatch | null) => {
       if (!active) return;
-      setDesktopLiveMatch(snapshot);
-      if (!snapshot) { desktopRosterKeyRef.current = null; setDesktopSoulsKnown(null); setDesktopOwnedItemIds([]); void getLastMatch().then((last) => active && setDesktopLastMatch(last)); return; }
-      const own = snapshot.players.find((entry) => entry.account_id != null && entry.account_id === snapshot.account_id);
+      if (!snapshot) {
+        if (desktopSnapshotGapRef.current != null) window.clearTimeout(desktopSnapshotGapRef.current);
+        desktopSnapshotGapRef.current = window.setTimeout(() => {
+          desktopSnapshotGapRef.current = null;
+          if (!active) return;
+          desktopSnapshotRef.current = null; setDesktopLiveMatch(null); desktopRosterKeyRef.current = null;
+          setDesktopSoulsKnown(null); setDesktopOwnedItemIds([]); setDesktopAdvice(null);
+          void getLastMatch().then((last) => active && setDesktopLastMatch(last));
+        }, 12_000);
+        return;
+      }
+      if (desktopSnapshotGapRef.current != null) window.clearTimeout(desktopSnapshotGapRef.current);
+      desktopSnapshotGapRef.current = null;
+      const previous = desktopSnapshotRef.current;
+      let stableSnapshot = snapshot;
+      if (previous && previous.match_id === snapshot.match_id && previous.account_id === snapshot.account_id) {
+        const keyOf = (player: DesktopMatch["players"][number], index: number) => player.account_id != null ? `account:${player.account_id}` : `bot:${player.team ?? "?"}:${player.hero_id ?? index}`;
+        const incoming = new Map(snapshot.players.map((player, index) => [keyOf(player, index), player]));
+        const seen = new Set<string>();
+        const merged = previous.players.map((player, index) => {
+          const key = keyOf(player, index); seen.add(key);
+          const fresh = incoming.get(key);
+          if (!fresh) return player;
+          return { ...player, ...fresh, hero_id: fresh.hero_id ?? player.hero_id, team: fresh.team ?? player.team,
+            kills: fresh.kills ?? player.kills, deaths: fresh.deaths ?? player.deaths, assists: fresh.assists ?? player.assists,
+            net_worth: fresh.net_worth ?? player.net_worth, unspent_souls: fresh.unspent_souls ?? player.unspent_souls,
+            owned_item_class_tokens: fresh.owned_item_class_tokens ?? player.owned_item_class_tokens, items: fresh.items ?? player.items };
+        });
+        snapshot.players.forEach((player, index) => { if (!seen.has(keyOf(player, index))) merged.push(player); });
+        stableSnapshot = { ...previous, ...snapshot, game_time_s: snapshot.game_time_s ?? previous.game_time_s, players: merged };
+      }
+      desktopSnapshotRef.current = stableSnapshot;
+      setDesktopLiveMatch(stableSnapshot);
+      const own = stableSnapshot.players.find((entry) => entry.account_id != null && entry.account_id === stableSnapshot.account_id);
       setDesktopSoulsKnown(own?.unspent_souls != null);
       if (own?.unspent_souls != null) setSouls(own.unspent_souls);
       // An empty inventory is meaningful only when the selected provider can read it.
-      const rosterKey = JSON.stringify([snapshot.match_id, snapshot.account_id, snapshot.players.map((entry) => [entry.account_id, entry.hero_id, entry.team])]);
-      if (snapshot.players.length && snapshot.account_id != null && desktopRosterKeyRef.current !== rosterKey) {
-        if (applyMatchRoster(snapshot.players, snapshot.account_id, snapshot)) {
+      const rosterKey = JSON.stringify([stableSnapshot.match_id, stableSnapshot.account_id, stableSnapshot.players.map((entry) => [entry.account_id, entry.hero_id, entry.team])]);
+      if (stableSnapshot.players.length && stableSnapshot.account_id != null && desktopRosterKeyRef.current !== rosterKey) {
+        if (applyMatchRoster(stableSnapshot.players, stableSnapshot.account_id, stableSnapshot)) {
           desktopRosterKeyRef.current = rosterKey;
-          setImportedMatchId(snapshot.match_id);
+          setImportedMatchId(stableSnapshot.match_id);
         }
       }
     };
@@ -555,7 +611,7 @@ export default function Home() {
     void getLastMatch().then((last) => { if (active) setDesktopLastMatch(last); });
     void onDesktopStatus(applyStatus).then((stop) => { if (active) stops.push(stop); else stop(); });
     void onDesktopMatch(applySnapshot).then((stop) => { if (active) stops.push(stop); else stop(); });
-    return () => { active = false; stops.forEach((stop) => stop()); };
+    return () => { active = false; if (desktopSnapshotGapRef.current != null) window.clearTimeout(desktopSnapshotGapRef.current); stops.forEach((stop) => stop()); };
   }, [importedMatchId]);
 
   useEffect(() => {
@@ -582,7 +638,11 @@ export default function Home() {
     if (!desktopAvailable()) return;
     let active = true;
     let stop: (() => void) | null = null;
-    const applyAdvice = (advice: DesktopAdvice | null) => { if (active) { setDesktopAdvice(advice); setDesktopOwnedItemIds(advice?.inventory_known ? advice.owned_item_ids ?? [] : []); } };
+    const applyAdvice = (advice: DesktopAdvice | null) => {
+      if (!active || !advice) return; // A transient incomplete snapshot must not erase the last usable live plan.
+      setDesktopAdvice(advice);
+      setDesktopOwnedItemIds(advice.inventory_known ? advice.owned_item_ids ?? [] : []);
+    };
     void getRecommendations().then(applyAdvice);
     void onRecommendations(applyAdvice).then((unlisten) => { if (active) stop = unlisten; else unlisten(); });
     return () => { active = false; stop?.(); };
@@ -622,8 +682,16 @@ export default function Home() {
 
   const analyze = useCallback(async () => {
     if (!items.length || !enemyIds.length) return;
+    const contextKey = `${heroId}:${enemyIds.join(",")}:${carryId}`;
+    if (analysisContextRef.current && analysisContextRef.current !== contextKey) {
+      setRecommendations([]);
+      setItemFlow(null);
+      setAllCounterStats([]);
+      setLaneCounterStats([]);
+    }
+    analysisContextRef.current = contextKey;
     const runId = ++analysisRunRef.current;
-    setLoading(true); setMatchup(null); setError(""); setCopied(false);
+    setLoading(true); setError(""); setCopied(false);
     try {
       const commonParams = new URLSearchParams({ min_matches: "80", game_mode: "normal", min_unix_timestamp: String(Math.floor(Date.now() / 1000) - dataWindow * 86400) });
       if (queueMode !== "all") commonParams.set("match_mode", queueMode);
@@ -633,6 +701,12 @@ export default function Home() {
       const laneCounterParams = new URLSearchParams(commonParams); laneCounterParams.set("same_lane_filter", "true");
       const responses = await Promise.allSettled([
         cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(common))),
+      const livePurchaseParams = desktopStatus?.in_game && desktopLiveMatch?.game_time_s != null ? new URLSearchParams(matchupCommon) : null;
+      if (livePurchaseParams) {
+        const windowCenter = Math.floor(effectiveGameTimeSeconds / 300) * 300;
+        livePurchaseParams.set("min_bought_at_s", String(Math.max(0, windowCenter - 300)));
+        livePurchaseParams.set("max_bought_at_s", String(windowCenter + 600));
+      }
         cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), enemyIds, true)),
         cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), [carryId])),
         cachedJson<CounterStat[]>(`${API}/analytics/hero-counter-stats?${matchupCommon}`),
@@ -642,6 +716,7 @@ export default function Home() {
       ] as const);
       const unwrap = <T,>(result: PromiseSettledResult<T>, label: string, fallback: T): T => {
         if (result.status === "fulfilled") return result.value;
+        livePurchaseParams ? Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(livePurchaseParams), [enemyId])))) : Promise.resolve([]),
         console.warn(`Deadlock API ${label} unavailable; recommendations will use remaining evidence.`, result.reason);
         return fallback;
       };
@@ -660,13 +735,22 @@ export default function Home() {
       const flowQuery = new URLSearchParams(commonParams); flowQuery.set("hero_ids", String(heroId));
       const flowResult = await Promise.allSettled([itemFlowStats(`${API}/analytics/item-flow-stats?${flowQuery}`)]);
       if (runId !== analysisRunRef.current) return;
+      const livePurchaseStats = settlePerEnemy(unwrap(responses[7], "live purchase-time matchup statistics", []), "live purchase-time matchup statistics");
       setItemFlow(flowResult[0].status === "fulfilled" ? flowResult[0].value : null);
       if (flowResult[0].status === "rejected") console.warn("Optional Deadlock item-flow data unavailable; continuing with item and matchup statistics.", flowResult[0].reason);
       if (runId !== analysisRunRef.current) return;
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
       const carryMap = new Map(carryStats.map((stat) => [stat.item_id, stat]));
-      const individualEnemyMaps = individualEnemyStats.map((stats) => new Map(stats.map((stat) => [stat.item_id, stat])));
+      const individualEnemyMaps = individualEnemyStats.map((stats, index) => {
+        const historical = new Map(livePurchaseStats[index].map((stat) => [stat.item_id, stat]));
+        const general = new Map(stats.map((stat) => [stat.item_id, stat]));
+        // Ten-minute match-time window; fall back item-by-item when evidence is sparse.
+        return new Map([...new Set([...general.keys(), ...historical.keys()])].map((id) => {
+          const timed = historical.get(id);
+          return [id, timed && timed.matches >= 40 ? timed : general.get(id)!] as const;
+        }).filter((entry): entry is readonly [number, ItemStat] => Boolean(entry[1])));
+      });
       setEnemyBuildSignals(enemyIds.map((heroId, index) => ({ heroId, stats: enemyBuildStats[index].sort((a, b) => b.matches - a.matches).slice(0, 4) })));
       const calculated = items.map((item) => {
         const base = baseMap.get(item.id), team = teamMap.get(item.id), carry = carryMap.get(item.id);
@@ -681,23 +765,20 @@ export default function Home() {
       }).filter((value): value is Recommendation => Boolean(value));
       const liveOwn = desktopLiveMatch?.players.find((player) => player.account_id != null && player.account_id === desktopLiveMatch.account_id);
       const liveEnemies = desktopLiveMatch?.players.filter((player) => liveOwn?.team != null && player.team != null && player.team !== liveOwn.team && player.hero_id != null) ?? [];
-      const statlocker = await fetchStatlockerProfiles(liveEnemies.flatMap((player) => player.account_id == null ? [] : [player.account_id]));
-      if (runId !== analysisRunRef.current) return;
-      setStatlockerStatus(statlocker.status);
-      const ppByAccount = new Map(statlocker.profiles.map((profile) => [profile.accountId, profile.ppScore]));
+      const ppByAccount = new Map(Object.values(playerProfiles).map((profile) => [profile.accountId, profile.ppScore]));
       const liveByHero = new Map(liveEnemies.map((player) => [player.hero_id!, player]));
       const threatInputs = enemyIds.map((enemyId) => {
         const player = liveByHero.get(enemyId);
         return { heroId: enemyId, netWorth: player?.net_worth, soulsPerMinute: desktopLiveMatch?.game_time_s && player?.net_worth != null ? player.net_worth / Math.max(1, desktopLiveMatch.game_time_s / 60) : null, kills: player?.kills, deaths: player?.deaths, assists: player?.assists, statlockerPP: player?.account_id == null ? null : ppByAccount.get(player.account_id) ?? null };
       });
-      const currentThreats = scoreThreats(threatInputs, desktopLiveMatch?.game_time_s ?? null);
+      const currentThreats = scoreThreats(threatInputs, effectiveGameTimeSeconds);
       const weightedThreatProfile = currentThreats.reduce((all, threat) => {
         Object.entries(threatsForHero(threat.heroId)).forEach(([tag, strength]) => { all[tag] = (all[tag] ?? 0) + (strength ?? 0) * threat.weight; });
         return all;
       }, {} as Record<string, number>);
       const ranked = rankItems(calculated.map((entry) => {
         const flow = flowResult[0].status === "fulfilled" ? flowResult[0].value : null;
-        const core = flowCoreFit(flow, entry.item.id, 0);
+        const core = flowCoreFit(flow, entry.item.id, itemFlowPhase(effectiveGameTimeSeconds));
         const itemThreats = { ...threats, healing: threats.healing || lifestealDetected };
         const mechanicFit = Math.max(counterCapability(entry.item.class_name, weightedThreatProfile), tagMatchesManualThreat(entry.item.class_name, itemThreats) ? 0.72 : 0);
         const preferenceFit = (buildStyle === "safe" && entry.item.item_slot_type === "vitality") ||
@@ -712,17 +793,17 @@ export default function Home() {
           enemyRates: entry.enemyRates.map((rate) => ({ heroId: rate.heroId, rate: rate.rate, matches: rate.matches })),
         };
       }),
-        threatInputs, desktopLiveMatch?.game_time_s ?? null);
+        threatInputs, effectiveGameTimeSeconds);
       const rankedById = new Map(ranked.map((entry) => [entry.itemId, entry]));
       const carryThreats = threatInputs.filter((enemy) => enemy.heroId === carryId);
       const carryRanked = rankItems(calculated.map((entry) => {
-        const core = flowCoreFit(flowResult[0].status === "fulfilled" ? flowResult[0].value : null, entry.item.id, 0);
+        const core = flowCoreFit(flowResult[0].status === "fulfilled" ? flowResult[0].value : null, entry.item.id, itemFlowPhase(effectiveGameTimeSeconds));
         return { itemId: entry.item.id, baselineRate: entry.baselineRate, coreRate: core?.rate ?? null, coreMatches: core?.matches ?? 0,
           exactRate: null, exactMatches: 0, averageBuyTimeSeconds: entry.carryBuyTime || null,
           mechanicFit: Math.max(counterCapability(entry.item.class_name, threatsForHero(carryId)), tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected }) ? 0.72 : 0),
           preferenceFit: buildStyle === "safe" && entry.item.item_slot_type === "vitality" ? 1 : buildStyle === "greedy" && (entry.item.cost ?? 0) >= 3200 ? 1 : 0,
           enemyRates: entry.enemyRates.filter((rate) => rate.heroId === carryId).map(({ heroId, rate, matches }) => ({ heroId, rate, matches })) };
-      }), carryThreats, desktopLiveMatch?.game_time_s ?? null);
+      }), carryThreats, effectiveGameTimeSeconds);
       const carryRankedById = new Map(carryRanked.map((entry) => [entry.itemId, entry]));
       setRecommendations(calculated.map((entry) => { const scored = rankedById.get(entry.item.id); const carryScored = carryRankedById.get(entry.item.id); const advisorReason = scored?.reason.replace(/Hero #(\d+)/g, (_match, id: string) => heroMap.get(Number(id))?.name ?? `Hero #${id}`); return { ...entry, carryScore: carryScored?.score ?? 0, teamScore: scored?.score ?? 0, advisorReason, coreFit: scored?.coreFit, counterFit: scored?.counterFit, mechanicFit: scored?.mechanicFit, exactFit: scored?.exactFit, threatTargets: scored?.threatTargets }; }));
       setAllCounterStats(counterStats);
@@ -731,7 +812,7 @@ export default function Home() {
       setUpdatedAt(new Date());
     } catch (error) { console.warn("Counterlock analysis failed; inspect Deadlock API responses and match inputs.", error); if (runId === analysisRunRef.current) setError(copy[lang].statsError); }
     finally { if (runId === analysisRunRef.current) setLoading(false); }
-  }, [buildStyle, carryId, dataWindow, desktopLiveMatch, enemyIds, heroId, heroMap, items, laneOnly, lang, lifestealDetected, matchState, queueMode, threats]);
+  }, [buildStyle, carryId, dataWindow, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, enemyIds, heroId, heroMap, items, laneOnly, lang, lifestealDetected, matchState, playerProfiles, queueMode, threats]);
 
   useEffect(() => {
     if (!desktopAvailable()) return;
@@ -740,8 +821,11 @@ export default function Home() {
     desktopBuildRef.current = build;
   }, [desktopStatus?.build_id, analyze]);
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- starts asynchronous data analysis when inputs become ready
-  useEffect(() => { if (items.length && enemyIds.length) void analyze(); }, [analyze, enemyIds.length, items.length]);
+  useEffect(() => {
+    if (!items.length || !enemyIds.length || analysisTriggerRef.current === analysisInputKey) return;
+    analysisTriggerRef.current = analysisInputKey;
+    void analyze();
+  }, [analysisInputKey, analyze, enemyIds.length, items.length]);
 
   function updateContext(action: () => void) { action(); setSortMode("recommended"); }
 
@@ -765,12 +849,14 @@ export default function Home() {
     const allowedIds = new Set(pool.map((entry) => entry.item.id));
     const planningCandidates: PlanCandidate[] = recommendations.map((entry) => ({ itemId: entry.item.id, score: values(entry).score,
       buyTime: values(entry).buyTime || null, tier: entry.item.item_tier, cost: entry.item.cost, category: entry.item.item_slot_type,
-      counterUrgency: Math.max(entry.mechanicFit ?? 0, entry.counterFit ?? 0), coreFit: entry.coreFit ?? 0,
+      counterUrgency: entry.counterUrgency ?? 0, coreFit: entry.coreFit ?? 0,
       mechanicFit: entry.mechanicFit ?? 0, components: itemComponents.get(entry.item.id) ?? [], owned: allOwnedItemIds.includes(entry.item.id) }));
     const flow = bestFlowPath(itemFlow, 4);
     const flowSet = new Set(flow);
     const pathCandidates = planningCandidates.filter((entry) => allowedIds.has(entry.itemId));
-    const nextBuyOrder = rankNextBuys(pathCandidates.map((entry) => ({ ...entry, pathSynergy: flowSet.has(entry.itemId) ? 0.08 : 0, timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - gameMinute * 60) / 900), opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 })));
+    const own = desktopStatus?.in_game && desktopLiveMatch ? desktopLiveMatch.players.find((player) => player.account_id != null && player.account_id === desktopLiveMatch.account_id) : null;
+    const liveSouls = own?.unspent_souls ?? null;
+    const nextBuyOrder = rankNextBuys(pathCandidates.map((entry) => ({ ...entry, pathSynergy: flowSet.has(entry.itemId) ? 0.08 : 0, timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - effectiveGameTimeSeconds) / 900), affordabilityUtility: entry.cost == null || liveSouls == null ? 0 : liveSouls >= entry.cost ? 1 : -Math.min(1, (entry.cost - liveSouls) / 5000), opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 })));
     const nextBuyScores = new Map(nextBuyOrder.map((entry) => [entry.itemId, entry.nextBuyScore]));
     const pathIds = planPurchasePath(pathCandidates, itemFlow, 16);
     const priorityIds = [...new Set([...nextBuyOrder.slice(0, 1).map((entry) => entry.itemId), ...pathIds])].slice(0, 16);
@@ -780,12 +866,13 @@ export default function Home() {
     const late = purchaseOrder.filter((entry) => !early.includes(entry) && !mid.includes(entry));
     const entriesById = new Map(recommendations.map((entry) => [entry.item.id, entry]));
     // Final inventory includes confirmed manual ownership; future purchases do not.
-    const slots = optimizeSlots(recommendations.flatMap((entry) => entry.item.item_slot_type ? [{ id: entry.item.id, category: entry.item.item_slot_type, score: values(entry).score + (allOwnedItemIds.includes(entry.item.id) ? 0.08 : 0), components: itemComponents.get(entry.item.id) }] : []));
+    const decisions = findSellDecisions(planningCandidates, purchaseOrder.map((entry) => entry.item.id));
+    const explicitlyReplaced = new Set(decisions.map((decision) => decision.sellId));
+    const slots = optimizeSlots(recommendations.flatMap((entry) => entry.item.item_slot_type ? [{ id: entry.item.id, category: entry.item.item_slot_type, score: values(entry).score, components: itemComponents.get(entry.item.id) }] : []), 4, 4, allOwnedItemIds.filter((id) => !explicitlyReplaced.has(id)));
     const weapon = slots.fixed.filter((slot) => slot.category === "weapon").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
     const vitality = slots.fixed.filter((slot) => slot.category === "vitality").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
     const spirit = slots.fixed.filter((slot) => slot.category === "spirit").map((slot) => entriesById.get(slot.id)!).filter(Boolean);
     const flex = slots.flex.map((slot) => entriesById.get(slot.id)!).filter(Boolean);
-    const decisions = findSellDecisions(planningCandidates, purchaseOrder.map((entry) => entry.item.id));
     const sellSuggestions = decisions.flatMap((decision) => { const sell = recommendations.find((entry) => entry.item.id === decision.sellId); const replacement = recommendations.find((entry) => entry.item.id === decision.replacementId); return sell && replacement ? [{ sell, replacement, reason: decision.reason }] : []; }).slice(0, 3);
     const adaptiveCounters = purchaseOrder.filter((entry) => (entry.mechanicFit ?? 0) > 0 || (entry.counterFit ?? 0) >= 0.012).slice(0, 5);
     const adaptiveIds = new Set(adaptiveCounters.map((entry) => entry.item.id));
@@ -793,7 +880,7 @@ export default function Home() {
     const situational = recommendations.filter((entry) => tagsForItem(entry.item.class_name).length > 0 && !(entry.mechanicFit ?? 0) && !tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected })).slice(0, 4);
     return { early, mid, late, weapon, vitality, spirit, flex, purchaseOrder, corePath, adaptiveCounters, situational, sellSuggestions, values,
       nextBuyOrder: nextBuyOrder.map((entry) => ({ itemId: entry.itemId, nextBuyScore: entry.nextBuyScore })), nextBuyScores };
-  }, [allOwnedItemIds, buildStyle, buyTarget, gameMinute, itemFlow, items, lifestealDetected, recommendations, threats]);
+  }, [allOwnedItemIds, buildStyle, buyTarget, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, itemFlow, items, lifestealDetected, recommendations, threats]);
 
   useEffect(() => {
     if (!desktopAvailable() || !recommendations.length || !heroId || !enemyIds.length) return;
@@ -826,9 +913,12 @@ export default function Home() {
     }).filter((entry): entry is CounterPick => Boolean(entry)).sort((a, b) => b.score - a.score);
   }, [allCounterStats, carryId, enemyIds, heroes]);
   const nextBuy = desktopStatus?.in_game
-    ? recommendations.find((entry) => entry.item.id === desktopAdvice?.recommended?.item_id)
+    ? recommendations.find((entry) => entry.item.id === liveAdviceForMatch?.recommended?.item_id && !allOwnedItemIds.includes(entry.item.id))
+      ?? recommendations.find((entry) => entry.item.id === localLiveNextBuyId && !allOwnedItemIds.includes(entry.item.id))
     : visibleRecommendations.find((entry) => !allOwnedItemIds.includes(entry.item.id));
-  const liveAdvice = desktopStatus?.in_game ? desktopAdvice?.recommended : null;
+  const liveAdviceForMatch = desktopAdvice?.match_id === desktopLiveMatch?.match_id ? desktopAdvice : null;
+  const localLiveNextBuyId = fullBuildPlan.nextBuyOrder.find((entry) => !allOwnedItemIds.includes(entry.itemId))?.itemId;
+  const liveAdvice = desktopStatus?.in_game ? liveAdviceForMatch?.recommended : null;
   const activeAlerts = [lifestealDetected ? t.lifestealDetected : null, threats.healing ? t.alertHealing : null, threats.weapon ? t.alertWeapon : null, threats.spirit ? t.alertSpirit : null, threats.crowdControl ? t.alertCrowdControl : null].filter((alert): alert is NonNullable<typeof alert> => alert !== null);
   const fullBuildCost = fullBuildPlan.purchaseOrder.reduce((sum, entry) => sum + (entry.item.cost ?? 0), 0);
   const remainingBuildCost = fullBuildPlan.purchaseOrder.filter((entry) => !allOwnedItemIds.includes(entry.item.id)).reduce((sum, entry) => sum + (entry.item.cost ?? 0), 0);
@@ -1127,8 +1217,8 @@ export default function Home() {
       {desktopStatus && <nav className="desktop-tabs" aria-label="Desktop views">{(["match", "build", "system"] as const).map((tab) => <button key={tab} type="button" className={desktopTab === tab ? "active" : ""} aria-current={desktopTab === tab ? "page" : undefined} onClick={() => setDesktopTab(tab)}>{tab === "match" ? "CURRENT MATCH" : tab === "build" ? "BUILD LAB" : "SYSTEM"}</button>)}</nav>}
       {patchOpen && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
 
-      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} advice={desktopAdvice} onOpenBuild={() => setDesktopTab("build")} />}
-      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={desktopAdvice} recommendations={recommendations} />}
+      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} profiles={playerProfiles} advice={desktopAdvice} onOpenBuild={() => setDesktopTab("build")} />}
+      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} profiles={playerProfiles} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={liveAdviceForMatch} recommendations={recommendations} />}
       {desktopStatus && desktopTab === "system" && <section className="desktop-system-page" aria-label="System diagnostics"><div className="desktop-system-heading"><small>COUNTERLOCK / SYSTEM</small><h1>System & diagnostics</h1><p>Runtime details and local desktop preferences.</p></div><div className="desktop-system-grid">
         <article><h2>Game connection</h2><dl><div><dt>Deadlock</dt><dd>{desktopStatus.game_running ? "Running" : "Not running"}</dd></div><div><dt>Process ID</dt><dd>{desktopStatus.pid ?? "—"}</dd></div><div><dt>Steam build</dt><dd>{desktopStatus.build_id ?? "Unknown"}</dd></div><div><dt>Live source</dt><dd>{desktopStatus.provider}</dd></div><div><dt>Console phase</dt><dd>{desktopStatus.console_phase ?? "No verified event"}</dd></div><div><dt>Match ID</dt><dd>{desktopStatus.match_id ?? "Unavailable"}</dd></div><div><dt>Inventory</dt><dd>{desktopStatus.capabilities.items ? "Available" : "Not available"}</dd></div><div><dt>Install path</dt><dd>{desktopStatus.installation_path ?? "Not detected"}</dd></div></dl>{desktopStatus.last_error && <p className="desktop-system-error">{desktopStatus.last_error}</p>}{desktopLastMatch && <p className="desktop-system-note">Last match: {desktopLastMatch.match_id ?? "ID unknown"} · {desktopLastMatch.source}</p>}</article>
         <article><h2>Desktop settings</h2><label><input type="checkbox" checked={desktopPreferences?.close_to_tray ?? true} onChange={(event) => void updateDesktopPreferences({ close_to_tray: event.target.checked })} />{lang === "de" ? "Beim Schließen im Tray weiterlaufen" : "Keep running in tray when closing"}</label><label><input type="checkbox" checked={desktopPreferences?.compact_always_on_top ?? true} onChange={(event) => void updateDesktopPreferences({ compact_always_on_top: event.target.checked })} />{lang === "de" ? "Kompaktfenster immer im Vordergrund" : "Keep compact window always on top"}</label><p>Game memory is read locally. Screenshots and unspent shop balance are separate capabilities.</p><hr /><h2>{lang === "de" ? "Software-Updates" : "Software updates"}</h2><button type="button" disabled={updateBusy} onClick={() => void checkDesktopUpdates()}>{updateBusy ? (lang === "de" ? "BITTE WARTEN …" : "PLEASE WAIT…") : (lang === "de" ? "NACH UPDATES SUCHEN" : "CHECK FOR UPDATES")}</button>{updateStatus && <p role="status">{updateStatus}</p>}</article>

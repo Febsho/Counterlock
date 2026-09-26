@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.3
+
+- Added Windows support for the existing read-only, exact-build game reader in
+  both the desktop app and standalone companion. On a supported client build,
+  this enables local roster, combat-stat, shop-soul, and owned-item detection.
+- Added player names, avatars, and clearly labeled Statlocker estimated ranks
+  to the live teams and Build Lab, with cached profile lookups.
+- Reworked the live Build Lab around an affordable next buy, player-targeted
+  reasons, alternatives, owned inventory, adaptive counters, and the full
+  purchase path.
+- Kept recommendations and roster context available across brief incomplete
+  match snapshots, and aligned item-flow and purchase timing with live match
+  time.
+
 ## 0.1.2
 
 - Reworked recommendations around the selected hero and enemy lineup, combining

@@ -19,11 +19,25 @@ export async function POST(request: Request) {
     if (!response.ok) return Response.json({ status: "unavailable", profiles: [] }, { status: 200 });
     const payload: unknown = await response.json();
     if (!Array.isArray(payload)) return Response.json({ status: "unavailable", profiles: [] }, { status: 200 });
+    const requestedIds = new Set(accountIds as number[]);
     const profiles = payload.flatMap((value) => {
       if (!value || typeof value !== "object") return [];
       const profile = value as Record<string, unknown>;
-      return Number.isInteger(profile.accountId) && Number.isFinite(profile.ppScore)
-        ? [{ accountId: profile.accountId, ppScore: profile.ppScore }] : [];
+      if (!Number.isInteger(profile.accountId) || !requestedIds.has(profile.accountId as number)) return [];
+      const safeText = (input: unknown, max: number) => typeof input === "string" && input.trim().length > 0 ? input.trim().slice(0, max) : null;
+      const safeUrl = (input: unknown) => {
+        if (typeof input !== "string") return null;
+        try { const url = new URL(input); return url.protocol === "https:" ? url.toString() : null; } catch { return null; }
+      };
+      const rank = profile.estimatedRankNumber;
+      return [{
+        accountId: profile.accountId,
+        name: safeText(profile.name, 80),
+        avatarUrl: safeUrl(profile.avatarUrl),
+        ppScore: Number.isFinite(profile.ppScore) ? profile.ppScore : null,
+        estimatedRankNumber: Number.isInteger(rank) && (rank as number) >= 11 && (rank as number) <= 116 && (rank as number) % 10 >= 1 && (rank as number) % 10 <= 6 ? rank : null,
+        region: safeText(profile.region, 24),
+      }];
     });
     return Response.json({ status: "connected", profiles }, { headers: { "Cache-Control": "private, max-age=900" } });
   } catch (error) {

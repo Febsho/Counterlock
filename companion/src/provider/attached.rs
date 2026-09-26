@@ -18,7 +18,6 @@ use crate::state::MatchSnapshot;
 use anyhow::Result;
 use std::sync::Mutex;
 
-#[cfg(unix)]
 use crate::game::GameReader;
 
 /// What the reader can supply once it is attached and the offsets fit.
@@ -42,7 +41,6 @@ pub struct AttachedProvider {
     config: Config,
     fallback: DeadlockApiProvider,
     fallback_allowed: bool,
-    #[cfg(unix)]
     reader: Mutex<Option<GameReader>>,
     /// Capabilities of whichever source produced the most recent snapshot.
     active: Mutex<Capabilities>,
@@ -74,7 +72,6 @@ impl AttachedProvider {
             config,
             fallback,
             fallback_allowed,
-            #[cfg(unix)]
             reader: Mutex::new(None),
             active,
             reported_fallback: Mutex::new(false),
@@ -90,7 +87,6 @@ impl AttachedProvider {
         }
     }
 
-    #[cfg(unix)]
     fn try_attached(&self, account_id: Option<u32>) -> Option<Result<Option<MatchSnapshot>>> {
         if !self.config.offsets.usable() {
             self.report_fallback(&format!(
@@ -106,7 +102,8 @@ impl AttachedProvider {
             *guard = None;
         }
         if guard.is_none() {
-            let pid = crate::platform::linux::game_pid()?;
+            let mut detector = crate::platform::detector();
+            let pid = detector.game_pid()?;
             match GameReader::attach(pid, &self.config.client_module, self.config.offsets.clone()) {
                 Ok(reader) => {
                     *self.reported_fallback.lock().unwrap() = false;
@@ -132,12 +129,6 @@ impl AttachedProvider {
                 None
             }
         }
-    }
-
-    #[cfg(not(unix))]
-    fn try_attached(&self, _account_id: Option<u32>) -> Option<Result<Option<MatchSnapshot>>> {
-        self.report_fallback("the attached reader is implemented for Linux only");
-        None
     }
 }
 
@@ -217,7 +208,7 @@ mod tests {
         assert!(!api.kills_deaths_assists && attached.kills_deaths_assists);
         assert!(!api.net_worth && attached.net_worth);
         assert!(!api.pause_state && attached.pause_state);
-        assert!(api.unspent_souls == false && attached.unspent_souls);
+        assert!(!api.unspent_souls && attached.unspent_souls);
         assert!(!api.items && attached.items);
         assert!(attached.unavailable_fields().is_empty());
     }

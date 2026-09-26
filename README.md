@@ -58,14 +58,15 @@ Updater signing is required. A keypair has been created at
 configuration. With GitHub CLI installed and authenticated, you can set it with
 `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/counterlock.key`. Then
 create a version tag matching `src-tauri/tauri.conf.json`, for example
-`v0.1.2`. If you password-protect the key, also add
+`v0.1.3`. If you password-protect the key, also add
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 Desktop live-match detection uses the running game and its local `console.log`,
 not the public Watch-tab match list. Add `-condebug` to Deadlock's Steam launch
 options and restart the game to enable log events. Match phase and ID can be
 read locally. On the exact supported client build, the attached desktop reader
-also reads live souls and the local player's owned items from game memory;
+on Linux and Windows also reads the local roster, combat stats, live souls, and
+owned items from game memory;
 unknown fields remain unavailable on other builds. The desktop can capture the
 current screen while the in-game scoreboard is visible; after reviewing and
 importing its hero detections, the confirmed roster enters the Rust match state
