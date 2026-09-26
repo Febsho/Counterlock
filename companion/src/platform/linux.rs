@@ -180,7 +180,9 @@ mod tests {
         assert!(is_deadlock_cmdline(
             b"S:\\steamapps\\common\\Deadlock\\game\\bin\\win64\\deadlock.exe\0-steam\0-vulkan\0"
         ));
-        assert!(is_deadlock_cmdline(b"/games/Deadlock/project8.exe\0-vulkan\0"));
+        assert!(is_deadlock_cmdline(
+            b"/games/Deadlock/project8.exe\0-vulkan\0"
+        ));
         assert!(!is_deadlock_cmdline(
             b"/usr/bin/python3\0proton\0/games/Deadlock/deadlock.exe\0"
         ));

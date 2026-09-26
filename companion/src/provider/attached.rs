@@ -151,16 +151,23 @@ impl MatchDataProvider for AttachedProvider {
 
     fn fetch(&self, account_id: Option<u32>) -> Result<Option<MatchSnapshot>> {
         if let Some(result) = self.try_attached(account_id) {
-            *self.active.lock().unwrap() = match result.as_ref().ok().and_then(|snapshot| snapshot.as_ref()) {
-                Some(snapshot) => Capabilities {
-                    match_id: snapshot.match_id.is_some(),
-                    pause_state: snapshot.paused.is_some(),
-                    net_worth: snapshot.players.iter().any(|player| player.net_worth.is_some()),
-                    kills_deaths_assists: snapshot.players.iter().any(|player| player.kills.is_some()),
-                    ..ATTACHED_CAPABILITIES
-                },
-                None => Capabilities::default(),
-            };
+            *self.active.lock().unwrap() =
+                match result.as_ref().ok().and_then(|snapshot| snapshot.as_ref()) {
+                    Some(snapshot) => Capabilities {
+                        match_id: snapshot.match_id.is_some(),
+                        pause_state: snapshot.paused.is_some(),
+                        net_worth: snapshot
+                            .players
+                            .iter()
+                            .any(|player| player.net_worth.is_some()),
+                        kills_deaths_assists: snapshot
+                            .players
+                            .iter()
+                            .any(|player| player.kills.is_some()),
+                        ..ATTACHED_CAPABILITIES
+                    },
+                    None => Capabilities::default(),
+                };
             return result;
         }
         if self.fallback_allowed {

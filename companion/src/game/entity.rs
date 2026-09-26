@@ -71,9 +71,9 @@ pub fn read_player(
 
     let hero_id = counter(offsets.hero_id).filter(|id| *id > 0 && *id < 1000);
     let team = offsets
-            .team
-            .and_then(|off| mem.read_u8(controller + off).ok())
-            .filter(|team| (1..=3).contains(team));
+        .team
+        .and_then(|off| mem.read_u8(controller + off).ok())
+        .filter(|team| (1..=3).contains(team));
     // Bots in local test matches have no Steam ID. Require both game-specific
     // fields before accepting one; otherwise any entity full of zeroes fits.
     if steam_id == 0 && (hero_id.is_none() || team.is_none()) {
