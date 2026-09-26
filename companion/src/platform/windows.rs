@@ -21,7 +21,7 @@ impl WindowsProcessDetector {
     pub fn new() -> Self {
         Self {
             system: System::new_with_specifics(
-                RefreshKind::nothing().with_processes(ProcessRefreshKind::nothing()),
+                RefreshKind::new().with_processes(ProcessRefreshKind::new()),
             ),
         }
     }
