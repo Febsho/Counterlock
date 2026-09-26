@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The bundled Counterlock windows may use core window controls and IPC.",
+  "windows": ["main", "compact"],
+  "permissions": ["core:default", "updater:default", "process:allow-restart"]
+}

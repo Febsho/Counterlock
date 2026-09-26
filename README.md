@@ -38,7 +38,49 @@ Create the static GitHub Pages export:
 GITHUB_REPOSITORY=Febsho/deadlock-counterlock npm run build:pages
 ```
 
-## Local companion
+## Desktop migration
+
+The new Tauri 2 desktop shell is under [`src-tauri/`](src-tauri/). It reuses the
+Rust companion's detectors and provider models through direct Rust modules,
+loads the current React UI as a static export, and uses IPC/events rather than
+starting a localhost server. Build on Linux with `npm run desktop:build` or run
+`npm run desktop:dev`. Windows requires the Tauri build prerequisites.
+
+Desktop CI builds the Linux AppImage and Windows NSIS `.exe` installer. Push a
+`v*` tag to publish both installers and signed updater metadata on a GitHub
+Release. The desktop System page includes **Check for updates**; updates are
+downloaded and installed only after confirmation.
+
+Updater signing is required. A keypair has been created at
+`~/.tauri/counterlock.key` (private) and `~/.tauri/counterlock.key.pub`
+(public). Add the private key file contents as the repository Actions secret
+`TAURI_SIGNING_PRIVATE_KEY`; the public key is already embedded in the Tauri
+configuration. With GitHub CLI installed and authenticated, you can set it with
+`gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/counterlock.key`. Then
+create a version tag matching `src-tauri/tauri.conf.json`, for example
+`v0.1.0`. If you password-protect the key, also add
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+
+Desktop live-match detection uses the running game and its local `console.log`,
+not the public Watch-tab match list. Add `-condebug` to Deadlock's Steam launch
+options and restart the game to enable log events. Match phase and ID can be
+read locally. The desktop can capture the current screen while the in-game
+scoreboard is visible; after reviewing and importing its hero detections, the
+confirmed roster enters the Rust match state and advisor. Souls and inventory
+remain unknown until a separate local source verifies them.
+On multiple monitors, select the display showing Deadlock before capturing.
+
+When a completed match has a confirmed match ID, Counterlock queues a Statlocker
+notification automatically. It sends the match ID and, when detected, your
+Steam account ID so Statlocker can associate the ingestion with your profile;
+the local queue retries temporary failures. This uses the same `/populate`
+notification path as the [Deadlock API ingest tool](https://github.com/deadlock-api/deadlock-api-ingest/blob/master/src/statlocker.rs).
+
+The desktop work is incremental. See [desktop migration status](docs/DESKTOP_MIGRATION.md)
+for implemented features, module decisions, data limits and the remaining
+phases. The old loopback companion remains available during the migration.
+
+## Legacy local companion
 
 The web app polls an optional local companion on `http://127.0.0.1:9876` every 8 seconds.
 The companion is a Rust binary in [companion/](companion/) that also serves this UI, so

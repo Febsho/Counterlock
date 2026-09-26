@@ -47,12 +47,18 @@ impl GameProcessState {
 /// Detects whether Deadlock is running. Implemented per platform.
 pub trait ProcessDetector: Send {
     fn is_game_running(&mut self) -> bool;
+    fn game_pid(&mut self) -> Option<u32> {
+        None
+    }
 }
 
 /// Lets [`GameLifecycle`] hold the boxed platform detector directly.
 impl ProcessDetector for Box<dyn ProcessDetector> {
     fn is_game_running(&mut self) -> bool {
         (**self).is_game_running()
+    }
+    fn game_pid(&mut self) -> Option<u32> {
+        (**self).game_pid()
     }
 }
 

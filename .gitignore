@@ -43,5 +43,7 @@ next-env.d.ts
 
 # rust companion
 /companion/target/
+/src-tauri/target/
+/src-tauri/gen/
 /companion/packaging/windows/Output/
 tsconfig.tsbuildinfo

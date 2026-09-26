@@ -36,6 +36,12 @@ impl ProcessDetector for WindowsProcessDetector {
             .values()
             .any(|process| is_deadlock_process(&process.name().to_string_lossy()))
     }
+    fn game_pid(&mut self) -> Option<u32> {
+        self.system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+        self.system.processes().iter()
+            .find(|(_, process)| is_deadlock_process(&process.name().to_string_lossy()))
+            .map(|(pid, _)| pid.as_u32())
+    }
 }
 
 /// PowerShell one-liner used for full-screen capture.

@@ -7,11 +7,19 @@
 use anyhow::{anyhow, bail, Result};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn temp_path() -> PathBuf {
     let mut dir = std::env::temp_dir();
-    // A fixed name keeps exactly one capture on disk at a time.
-    dir.push("counterlock-hud-capture.png");
+    // Unique names keep concurrent captures (or two running app instances)
+    // from reading and deleting each other's PNGs.
+    dir.push(format!(
+        "counterlock-hud-capture-{}-{}.png",
+        std::process::id(),
+        CAPTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
     dir
 }
 
@@ -138,6 +146,7 @@ mod tests {
         let path = temp_path();
         assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
         assert!(path.starts_with(std::env::temp_dir()));
+        assert_ne!(path, temp_path());
     }
 
     #[test]

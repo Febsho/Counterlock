@@ -67,20 +67,20 @@ impl Default for Offsets {
 impl Offsets {
     /// Whether the minimum set needed to report anything is present.
     pub fn usable(&self) -> bool {
-        self.client.game_rules.is_some()
-            && self.rules.game_state.is_some()
-            && self.client.entity_system.is_some()
+        self.client.entity_system.is_some()
             && self.player.steam_id.is_some()
+            && self.player.hero_id.is_some()
+            && self.player.team.is_some()
     }
 
     /// Names of the offsets that must be filled in before the reader can run.
     pub fn missing_essentials(&self) -> Vec<&'static str> {
         let mut missing = Vec::new();
         for (present, name) in [
-            (self.client.game_rules.is_some(), "client.game_rules"),
-            (self.rules.game_state.is_some(), "rules.game_state"),
             (self.client.entity_system.is_some(), "client.entity_system"),
             (self.player.steam_id.is_some(), "player.steam_id"),
+            (self.player.hero_id.is_some(), "player.hero_id"),
+            (self.player.team.is_some(), "player.team"),
         ] {
             if !present {
                 missing.push(name);
@@ -182,6 +182,9 @@ pub struct Config {
     /// always allowed; add entries here for a dev server on another port.
     pub allowed_origins: Vec<String>,
     pub provider: ProviderKind,
+    /// Legacy desktop setting retained for existing config files. The desktop
+    /// now selects its local memory reader automatically when telemetry is on.
+    pub desktop_experimental_attached: bool,
     /// Poll cadence while a match is live, in milliseconds. Clamped to 1000-2000
     /// so we stay inside the documented 1-2s push window.
     pub in_match_poll_ms: u64,
@@ -210,7 +213,8 @@ impl Default for Config {
         Self {
             port: 9876,
             allowed_origins: Vec::new(),
-            provider: ProviderKind::Attached,
+            provider: ProviderKind::DeadlockApi,
+            desktop_experimental_attached: false,
             in_match_poll_ms: 1500,
             idle_poll_ms: 8000,
             account_id: None,

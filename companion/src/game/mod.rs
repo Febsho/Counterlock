@@ -67,6 +67,28 @@ impl GameReader {
             bail!("game process {} exited", self.mem.pid());
         }
 
+        if self.offsets.client.game_rules.is_none() || self.offsets.rules.game_state.is_none() {
+            // A build-locked roster profile can still report the player's own
+            // match without a game-rules pointer. Require a real account and
+            // both teams so a menu preview cannot appear as a live match.
+            let players = self.roster();
+            let has_human = players.iter().any(|player| player.account_id.is_some());
+            let has_both_teams = players.iter().any(|player| player.team == Some(2))
+                && players.iter().any(|player| player.team == Some(3));
+            if !has_human || !has_both_teams {
+                self.first_seen_live = None;
+                return Ok(None);
+            }
+            let now = crate::state::unix_now();
+            let started = *self.first_seen_live.get_or_insert(now);
+            let mut snapshot = MatchSnapshot::new(SOURCE);
+            snapshot.account_id = account_id
+                .filter(|id| players.iter().any(|player| player.account_id == Some(*id)))
+                .or_else(|| players.iter().find_map(|player| player.account_id));
+            snapshot.duration_s = Some(now.saturating_sub(started));
+            snapshot.players = players;
+            return Ok(Some(snapshot.finalize()));
+        }
         let rules = self.rules_object()?;
         let state_value = match self.offsets.rules.game_state {
             Some(offset) => self.mem.read_u32(rules + offset)?,

@@ -104,7 +104,7 @@ Snapshot shape:
   "players": [{
     "account_id": 42, "hero_id": 7, "team": 0, "slot": 1,
     "kills": null, "deaths": null, "assists": null,
-    "net_worth": null, "souls_per_minute": null, "items": []
+    "net_worth": null, "souls_per_minute": null, "items": null
   }]
 }
 ```
@@ -134,7 +134,7 @@ roster-level: **per-player combat stats are not available from it.**
 
 ### The `attached` provider
 
-Default since it is the only source that reports live combat stats. It opens
+Optional and experimental; it is the only current provider that can report live combat stats. It opens
 `/proc/<pid>/mem` on the running client, follows the entity list and the
 game-rules object, and copies out the values the HUD already draws. It is
 **strictly read-only**: no writes, no injection, no hooks. Scope is limited to

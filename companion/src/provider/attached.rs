@@ -40,6 +40,7 @@ pub const ATTACHED_CAPABILITIES: Capabilities = Capabilities {
 pub struct AttachedProvider {
     config: Config,
     fallback: DeadlockApiProvider,
+    fallback_allowed: bool,
     #[cfg(unix)]
     reader: Mutex<Option<GameReader>>,
     /// Capabilities of whichever source produced the most recent snapshot.
@@ -51,11 +52,25 @@ pub struct AttachedProvider {
 
 impl AttachedProvider {
     pub fn new(config: Config) -> Self {
+        Self::with_fallback(config, true)
+    }
+
+    /// Desktop mode never consults the public Watch-tab match list.
+    pub fn new_local_only(config: Config) -> Self {
+        Self::with_fallback(config, false)
+    }
+
+    fn with_fallback(config: Config, fallback_allowed: bool) -> Self {
         let fallback = DeadlockApiProvider::new(config.deadlock_api_base.clone());
-        let active = Mutex::new(fallback.capabilities());
+        let active = Mutex::new(if fallback_allowed {
+            fallback.capabilities()
+        } else {
+            Capabilities::default()
+        });
         Self {
             config,
             fallback,
+            fallback_allowed,
             #[cfg(unix)]
             reader: Mutex::new(None),
             active,
@@ -67,7 +82,7 @@ impl AttachedProvider {
     fn report_fallback(&self, reason: &str) {
         let mut reported = self.reported_fallback.lock().unwrap();
         if !*reported {
-            tracing::info!(reason, "attached reader unavailable, using the public API");
+            tracing::info!(reason, "attached reader unavailable");
             *reported = true;
         }
     }
@@ -136,11 +151,25 @@ impl MatchDataProvider for AttachedProvider {
 
     fn fetch(&self, account_id: Option<u32>) -> Result<Option<MatchSnapshot>> {
         if let Some(result) = self.try_attached(account_id) {
-            *self.active.lock().unwrap() = ATTACHED_CAPABILITIES;
+            *self.active.lock().unwrap() = match result.as_ref().ok().and_then(|snapshot| snapshot.as_ref()) {
+                Some(snapshot) => Capabilities {
+                    match_id: snapshot.match_id.is_some(),
+                    pause_state: snapshot.paused.is_some(),
+                    net_worth: snapshot.players.iter().any(|player| player.net_worth.is_some()),
+                    kills_deaths_assists: snapshot.players.iter().any(|player| player.kills.is_some()),
+                    ..ATTACHED_CAPABILITIES
+                },
+                None => Capabilities::default(),
+            };
             return result;
         }
-        *self.active.lock().unwrap() = self.fallback.capabilities();
-        self.fallback.fetch(account_id)
+        if self.fallback_allowed {
+            *self.active.lock().unwrap() = self.fallback.capabilities();
+            self.fallback.fetch(account_id)
+        } else {
+            *self.active.lock().unwrap() = Capabilities::default();
+            Ok(None)
+        }
     }
 }
 
@@ -160,6 +189,13 @@ mod tests {
     fn unconfigured_offsets_fall_back_instead_of_reading() {
         let provider = AttachedProvider::new(Config::default());
         assert!(provider.try_attached(None).is_none());
+    }
+
+    #[test]
+    fn desktop_local_only_never_uses_the_public_provider() {
+        let provider = AttachedProvider::new_local_only(Config::default());
+        assert!(provider.fetch(None).unwrap().is_none());
+        assert_eq!(provider.capabilities(), Capabilities::default());
     }
 
     #[test]

@@ -40,14 +40,14 @@ pub struct PlayerState {
     pub kills: Option<u32>,
     pub deaths: Option<u32>,
     pub assists: Option<u32>,
-    /// Current souls (net worth). `None` when the provider does not expose it.
+    /// Total gold net worth, not the unspent shop balance.
     pub net_worth: Option<u32>,
     /// Derived: `net_worth / active_game_minutes`. `None` whenever net worth is
     /// absent or no active time has elapsed yet.
     pub souls_per_minute: Option<f64>,
-    /// Item ids in purchase order, empty when unavailable.
+    /// Item ids in purchase order. `None` when the provider cannot read inventory.
     #[serde(default)]
-    pub items: Vec<u32>,
+    pub items: Option<Vec<u32>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

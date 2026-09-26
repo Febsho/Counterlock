@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Counterlock",
+  "version": "0.1.0",
+  "identifier": "dev.counterlock.desktop",
+  "build": {
+    "frontendDist": "../out",
+    "beforeBuildCommand": "npm run build:companion-ui"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "Counterlock",
+      "width": 1280,
+      "height": 840,
+      "minWidth": 900,
+      "minHeight": 600
+    }],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage", "nsis"],
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.png", "icons/icon.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM2ODQ3MUI2Mzg1NkU0MTAKUldRUTVGWTR0bkdFeHVtTEc4TVpVTGpkSjcweDRDNW9OUDhtN0xhTW9YbzJNTFdMeDJITk9xSnkK",
+      "endpoints": ["https://github.com/Febsho/deadlock-counterlock/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

@@ -17,13 +17,21 @@ port = 9876
 allowed_origins = []
 
 # Telemetry source:
-#   "attached"      read the running game client (default). The only source
+#   "attached"      optional experimental reader of the running game client.
+#                   The only source
 #                   that reports per-player KDA, souls and pause state. Needs
 #                   the offsets below and CAP_SYS_PTRACE; falls back to
 #                   "deadlock-api" whenever it cannot read the process.
 #   "deadlock-api"  public Deadlock API (matches/active), roster-level only
+#                   for the legacy companion. The Tauri desktop never uses
+#                   this feed to identify your live match; it watches the
+#                   local Deadlock process and console log instead.
 #   "none"          serve the UI only, report no match data
-provider = "attached"
+provider = "deadlock-api"
+
+# Legacy desktop setting retained for older config files. Desktop now tries
+# its local process-memory reader whenever provider is not "none".
+desktop_experimental_attached = false
 
 # Poll cadence while a match is live, in milliseconds. Clamped to 1000-2000.
 in_match_poll_ms = 1500

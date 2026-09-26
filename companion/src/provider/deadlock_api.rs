@@ -82,7 +82,7 @@ impl From<WirePlayer> for PlayerState {
             net_worth: wire.net_worth,
             // Derived later by MatchSnapshot::finalize.
             souls_per_minute: None,
-            items: wire.items.unwrap_or_default(),
+            items: wire.items,
         }
     }
 }
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(snapshot.players[0].kills, None);
         assert_eq!(snapshot.players[0].net_worth, None);
         assert_eq!(snapshot.players[0].souls_per_minute, None);
-        assert!(snapshot.players[0].items.is_empty());
+        assert!(snapshot.players[0].items.is_none());
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
         assert_eq!(player.kills, Some(5));
         assert_eq!(player.net_worth, Some(12_000));
         assert_eq!(player.souls_per_minute, Some(1200.0));
-        assert_eq!(player.items, vec![101, 102]);
+        assert_eq!(player.items, Some(vec![101, 102]));
     }
 
     #[test]

@@ -59,7 +59,7 @@ pub fn read_player(
     offsets: &PlayerOffsets,
 ) -> Option<(u64, PlayerState)> {
     let steam_id = mem.read_u64(controller + offsets.steam_id?).ok()?;
-    if !(STEAM64_MIN..=STEAM64_MAX).contains(&steam_id) {
+    if steam_id != 0 && !(STEAM64_MIN..=STEAM64_MAX).contains(&steam_id) {
         return None;
     }
 
@@ -69,13 +69,20 @@ pub fn read_player(
             .filter(|value| *value < COUNTER_CEILING)
     };
 
-    let player = PlayerState {
-        account_id: crate::steam::account_id_from_steam_id64(steam_id).ok(),
-        hero_id: counter(offsets.hero_id).filter(|id| *id > 0 && *id < 1000),
-        team: offsets
+    let hero_id = counter(offsets.hero_id).filter(|id| *id > 0 && *id < 1000);
+    let team = offsets
             .team
             .and_then(|off| mem.read_u8(controller + off).ok())
-            .filter(|team| (1..=3).contains(team)),
+            .filter(|team| (1..=3).contains(team));
+    // Bots in local test matches have no Steam ID. Require both game-specific
+    // fields before accepting one; otherwise any entity full of zeroes fits.
+    if steam_id == 0 && (hero_id.is_none() || team.is_none()) {
+        return None;
+    }
+    let player = PlayerState {
+        account_id: crate::steam::account_id_from_steam_id64(steam_id).ok(),
+        hero_id,
+        team,
         slot: None,
         kills: counter(offsets.kills),
         deaths: counter(offsets.deaths),
@@ -84,7 +91,7 @@ pub fn read_player(
         // Derived by MatchSnapshot::finalize once the match clock is known.
         souls_per_minute: None,
         // The reader does not walk the inventory yet.
-        items: Vec::new(),
+        items: None,
     };
     Some((steam_id, player))
 }
@@ -107,7 +114,7 @@ pub fn collect_players(
         let Some((steam_id, mut player)) = read_player(mem, entity, offsets) else {
             continue;
         };
-        if players.iter().any(|(seen, _)| *seen == steam_id) {
+        if steam_id != 0 && players.iter().any(|(seen, _)| *seen == steam_id) {
             continue;
         }
         player.slot = u8::try_from(players.len()).ok();

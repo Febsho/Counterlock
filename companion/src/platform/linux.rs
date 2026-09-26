@@ -1,8 +1,8 @@
 //! Linux platform adapter.
 //!
-//! Process detection reads `/proc/<pid>/comm` directly instead of going through
-//! `sysinfo`: it is a handful of small reads, needs no periodic full refresh,
-//! and never inspects another process's memory or command line.
+//! Process detection first reads `/proc/<pid>/comm`. Proton can rename the game
+//! thread to `MainThrd`, so a fallback checks the executable argument in
+//! `/proc/<pid>/cmdline`. It never inspects another process's memory.
 
 use super::{is_deadlock_process, ProcessDetector};
 use std::fs;
@@ -41,6 +41,9 @@ impl ProcessDetector for LinuxProcessDetector {
     fn is_game_running(&mut self) -> bool {
         game_pid().is_some()
     }
+    fn game_pid(&mut self) -> Option<u32> {
+        game_pid()
+    }
 }
 
 /// Pid of the running game, or `None`.
@@ -50,6 +53,7 @@ impl ProcessDetector for LinuxProcessDetector {
 /// mapped `client.dll` before trusting it.
 pub fn game_pid() -> Option<u32> {
     let entries = fs::read_dir("/proc").ok()?;
+    let mut renamed_processes = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
@@ -57,16 +61,40 @@ pub fn game_pid() -> Option<u32> {
         if !name.bytes().all(|b| b.is_ascii_digit()) {
             continue;
         }
-        // `comm` is truncated to 15 bytes by the kernel, so a long name such
-        // as "project8.exe" is safe but anything longer would need cmdline.
+        // `comm` is truncated to 15 bytes by the kernel. Proton may also
+        // replace it with a thread name, so check argv in a fallback pass.
         let Ok(comm) = fs::read_to_string(entry.path().join("comm")) else {
             continue;
         };
         if is_deadlock_process(comm.trim()) {
             return name.parse().ok();
         }
+        // Proton/Wine may change the game thread's comm to "MainThrd".
+        // Keep those processes for a second pass over their executable argv.
+        if let Ok(pid) = name.parse::<u32>() {
+            renamed_processes.push((entry.path(), pid));
+        }
+    }
+    for (path, pid) in renamed_processes {
+        if fs::read(path.join("cmdline"))
+            .ok()
+            .is_some_and(|cmdline| is_deadlock_cmdline(&cmdline))
+        {
+            return Some(pid);
+        }
     }
     None
+}
+
+fn is_deadlock_cmdline(cmdline: &[u8]) -> bool {
+    let first = cmdline.split(|byte| *byte == 0).next().unwrap_or_default();
+    let executable = first
+        .rsplit(|byte| *byte == b'/' || *byte == b'\\')
+        .next()
+        .unwrap_or_default();
+    std::str::from_utf8(executable)
+        .ok()
+        .is_some_and(is_deadlock_process)
 }
 
 /// Screen-capture commands to try, in order, for the current session.
@@ -145,5 +173,17 @@ mod tests {
         // The game is not running in CI; the call must simply return false.
         let mut detector = LinuxProcessDetector::new();
         let _ = detector.is_game_running();
+    }
+
+    #[test]
+    fn proton_renamed_game_thread_is_identified_by_its_executable_argument() {
+        assert!(is_deadlock_cmdline(
+            b"S:\\steamapps\\common\\Deadlock\\game\\bin\\win64\\deadlock.exe\0-steam\0-vulkan\0"
+        ));
+        assert!(is_deadlock_cmdline(b"/games/Deadlock/project8.exe\0-vulkan\0"));
+        assert!(!is_deadlock_cmdline(
+            b"/usr/bin/python3\0proton\0/games/Deadlock/deadlock.exe\0"
+        ));
+        assert!(!is_deadlock_cmdline(b"/usr/bin/counterlock-desktop\0"));
     }
 }

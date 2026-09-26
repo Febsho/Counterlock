@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
+import { captureHud, checkForDesktopUpdate, desktopAvailable, getDesktopMatch, getDesktopStatus, getDesktopMonitors, getDesktopPreferences, getLastMatch, getRecommendations, installDesktopUpdate, onDesktopMatch, onDesktopStatus, onOpenSettings, onRecommendations, saveDesktopPreferences, setAdvisorEvidence, submitLocalRoster, type DesktopAdvice, type DesktopMatch, type DesktopStatus, type DesktopPreferences, type DesktopMonitor } from "./desktop";
+import { DesktopLivePanel } from "./DesktopLivePanel";
+import { DesktopBuildLab } from "./DesktopBuildLab";
 
 const API = "https://api.deadlock-api.com/v1";
 
@@ -360,6 +363,19 @@ export default function Home() {
   const [liveImportMessage, setLiveImportMessage] = useState("");
   const [importedMatchId, setImportedMatchId] = useState<number | null>(null);
   const [companionStatus, setCompanionStatus] = useState<"offline" | "waiting" | "connected">("offline");
+  const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(null);
+  const [desktopLiveMatch, setDesktopLiveMatch] = useState<DesktopMatch | null>(null);
+  const [desktopSoulsKnown, setDesktopSoulsKnown] = useState<boolean | null>(null);
+  const [desktopPreferences, setDesktopPreferences] = useState<DesktopPreferences | null>(null);
+  const [desktopTab, setDesktopTab] = useState<"match" | "build" | "system">("match");
+  const [desktopLastMatch, setDesktopLastMatch] = useState<DesktopMatch | null>(null);
+  const [desktopAdvice, setDesktopAdvice] = useState<DesktopAdvice | null>(null);
+  const [desktopCaptureBusy, setDesktopCaptureBusy] = useState(false);
+  const [desktopCaptureError, setDesktopCaptureError] = useState("");
+  const [updateStatus, setUpdateStatus] = useState("");
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [desktopMonitors, setDesktopMonitors] = useState<DesktopMonitor[]>([]);
+  const [desktopMonitorIndex, setDesktopMonitorIndex] = useState(0);
   const [importerOpen, setImporterOpen] = useState(false);
   const [importTarget, setImportTarget] = useState<ImportTarget>("enemy");
   const [screenshotUrl, setScreenshotUrl] = useState("");
@@ -373,6 +389,8 @@ export default function Home() {
   const companionMatchRef = useRef<number | null>(null);
   const companionCaptureRef = useRef<number | null>(null);
   const companionRosterRef = useRef<number | null>(null);
+  const desktopBuildRef = useRef<string | null>(null);
+  const desktopRosterKeyRef = useRef<string | null>(null);
   const t = copy[lang];
   const phase: Phase = gameMinute < 11 ? "early" : gameMinute < 21 ? "mid" : "late";
 
@@ -452,6 +470,7 @@ export default function Home() {
   }, [darkMode]);
 
   useEffect(() => {
+    if (desktopAvailable()) return;
     let mounted = true;
     const pollCompanion = async () => {
       try {
@@ -487,6 +506,103 @@ export default function Home() {
     const timer = window.setInterval(() => void pollCompanion(), 8_000);
     return () => { mounted = false; window.clearInterval(timer); };
   }, [importedMatchId]);
+
+  useEffect(() => {
+    if (!desktopAvailable()) return;
+    let active = true;
+    const stops: Array<() => void> = [];
+    const applyStatus = (status: Awaited<ReturnType<typeof getDesktopStatus>>) => {
+      if (active) { setDesktopStatus(status); setCompanionStatus(status.in_game ? "connected" : "waiting"); }
+    };
+    const applySnapshot = (snapshot: DesktopMatch | null) => {
+      if (!active) return;
+      setDesktopLiveMatch(snapshot);
+      if (!snapshot) { desktopRosterKeyRef.current = null; setDesktopSoulsKnown(null); void getLastMatch().then((last) => active && setDesktopLastMatch(last)); return; }
+      // The reader supplies total net worth, not the unspent shop balance.
+      setDesktopSoulsKnown(false);
+      // An empty inventory is meaningful only when the selected provider can read it.
+      const rosterKey = JSON.stringify([snapshot.match_id, snapshot.account_id, snapshot.players.map((entry) => [entry.account_id, entry.hero_id, entry.team])]);
+      if (snapshot.players.length && snapshot.account_id != null && desktopRosterKeyRef.current !== rosterKey) {
+        if (applyMatchRoster(snapshot.players, snapshot.account_id, snapshot)) {
+          desktopRosterKeyRef.current = rosterKey;
+          setImportedMatchId(snapshot.match_id);
+        }
+      }
+    };
+    void getDesktopStatus().then(applyStatus).catch(() => active && setCompanionStatus("offline"));
+    void getDesktopMatch().then(applySnapshot);
+    void getLastMatch().then((last) => { if (active) setDesktopLastMatch(last); });
+    void onDesktopStatus(applyStatus).then((stop) => { if (active) stops.push(stop); else stop(); });
+    void onDesktopMatch(applySnapshot).then((stop) => { if (active) stops.push(stop); else stop(); });
+    return () => { active = false; stops.forEach((stop) => stop()); };
+  }, [importedMatchId]);
+
+  useEffect(() => {
+    if (!desktopAvailable()) return;
+    let active = true;
+    let stop: (() => void) | null = null;
+    void getDesktopPreferences().then((preferences) => { if (active) setDesktopPreferences(preferences); });
+    void getDesktopMonitors().then((monitors) => {
+      if (!active) return;
+      setDesktopMonitors(monitors);
+      const savedRaw = window.localStorage.getItem("counterlock-capture-monitor");
+      const saved = Number(savedRaw);
+      const largest = monitors.reduce((best, monitor) => monitor.width * monitor.height > (monitors[best]?.width ?? 0) * (monitors[best]?.height ?? 0) ? monitor.index : best, 0);
+      setDesktopMonitorIndex(savedRaw !== null && Number.isInteger(saved) && saved >= 0 && saved < monitors.length ? saved : largest);
+    }).catch(() => {});
+    void onOpenSettings(() => { if (active) setDesktopTab("system"); }).then((unlisten) => { if (active) stop = unlisten; else unlisten(); });
+    return () => { active = false; stop?.(); };
+  }, []);
+
+  useEffect(() => {
+    if (!desktopAvailable()) return;
+    let active = true;
+    let stop: (() => void) | null = null;
+    void getRecommendations().then((advice) => { if (active) setDesktopAdvice(advice); });
+    void onRecommendations((advice) => { if (active) setDesktopAdvice(advice); }).then((unlisten) => { if (active) stop = unlisten; else unlisten(); });
+    return () => { active = false; stop?.(); };
+  }, []);
+
+  useEffect(() => {
+    if (!desktopAvailable() || !recommendations.length || !heroId || !enemyIds.length) return;
+    void setAdvisorEvidence({ hero_id: heroId, enemy_ids: enemyIds, items: recommendations.filter((entry) => entry.item.cost != null).map((entry) => ({
+      item_id: entry.item.id, name: entry.item.name, cost: entry.item.cost!, baseline_rate: entry.baselineRate,
+      team_rate: entry.teamRate, team_matches: entry.teamMatches, average_buy_time_s: entry.teamBuyTime,
+      enemy_rates: entry.enemyRates.map((rate) => ({ hero_id: rate.heroId, hero_name: heroMap.get(rate.heroId)?.name ?? `Hero #${rate.heroId}`, rate: rate.rate, matches: rate.matches })),
+    })) });
+  }, [recommendations, heroId, enemyIds, heroMap]);
+
+  async function updateDesktopPreferences(patch: Partial<DesktopPreferences>) {
+    if (!desktopPreferences) return;
+    const next = { ...desktopPreferences, ...patch };
+    await saveDesktopPreferences(next);
+    setDesktopPreferences(next);
+  }
+
+  async function checkDesktopUpdates() {
+    setUpdateBusy(true);
+    setUpdateStatus(lang === "de" ? "Suche nach Updates …" : "Checking for updates…");
+    try {
+      const update = await checkForDesktopUpdate();
+      if (!update) {
+        setUpdateStatus(lang === "de" ? "Du verwendest die aktuelle Version." : "You’re up to date.");
+        return;
+      }
+      const prompt = lang === "de"
+        ? `Counterlock ${update.version} ist verfügbar. Jetzt installieren?`
+        : `Counterlock ${update.version} is available. Install it now?`;
+      if (!window.confirm(prompt)) {
+        setUpdateStatus(lang === "de" ? `Version ${update.version} verfügbar.` : `Version ${update.version} is available.`);
+        return;
+      }
+      setUpdateStatus(lang === "de" ? "Update wird installiert …" : "Installing update…");
+      await installDesktopUpdate(update);
+    } catch (error) {
+      setUpdateStatus(`${lang === "de" ? "Update fehlgeschlagen" : "Update failed"}: ${String(error)}`);
+    } finally {
+      setUpdateBusy(false);
+    }
+  }
 
   const analyze = useCallback(async () => {
     if (!items.length || !enemyIds.length) return;
@@ -532,6 +648,13 @@ export default function Home() {
     } catch { if (runId === analysisRunRef.current) setError(copy[lang].statsError); }
     finally { if (runId === analysisRunRef.current) setLoading(false); }
   }, [carryId, dataWindow, enemyIds, heroId, items, laneOnly, lang, queueMode]);
+
+  useEffect(() => {
+    if (!desktopAvailable()) return;
+    const build = desktopStatus?.build_id ?? null;
+    if (desktopBuildRef.current && build && desktopBuildRef.current !== build) void analyze();
+    desktopBuildRef.current = build;
+  }, [desktopStatus?.build_id, analyze]);
 
   useEffect(() => { if (items.length && enemyIds.length) void analyze(); }, [analyze, enemyIds.length, items.length]);
 
@@ -606,7 +729,10 @@ export default function Home() {
       return { hero, score: Math.max(.35, Math.min(.65, .5 + (weightedLift / totalWeight) * coverageFactor)), carryRate, matches, coverage };
     }).filter((entry): entry is CounterPick => Boolean(entry)).sort((a, b) => b.score - a.score);
   }, [allCounterStats, carryId, enemyIds, heroes]);
-  const nextBuy = visibleRecommendations.find((entry) => !ownedItemIds.includes(entry.item.id));
+  const nextBuy = desktopStatus?.in_game
+    ? recommendations.find((entry) => entry.item.id === desktopAdvice?.recommended?.item_id)
+    : visibleRecommendations.find((entry) => !ownedItemIds.includes(entry.item.id));
+  const liveAdvice = desktopStatus?.in_game ? desktopAdvice?.recommended : null;
   const activeAlerts = [lifestealDetected ? t.lifestealDetected : null, threats.healing ? t.alertHealing : null, threats.weapon ? t.alertWeapon : null, threats.spirit ? t.alertSpirit : null, threats.crowdControl ? t.alertCrowdControl : null].filter((alert): alert is NonNullable<typeof alert> => alert !== null);
   const fullBuildCost = fullBuildPlan.purchaseOrder.reduce((sum, entry) => sum + (entry.item.cost ?? 0), 0);
   const remainingBuildCost = fullBuildPlan.purchaseOrder.filter((entry) => !ownedItemIds.includes(entry.item.id)).reduce((sum, entry) => sum + (entry.item.cost ?? 0), 0);
@@ -650,6 +776,27 @@ export default function Home() {
   function applyAllies() { setAllyIds(pendingAllyIds); closeAllyPicker(); }
   function removeAlly(id: number) { setAllyIds((current) => current.filter((allyId) => allyId !== id)); }
   function openImporter(target: ImportTarget) { setImportTarget(target); setImporterOpen(true); }
+  async function captureCurrentScoreboard() {
+    setDesktopCaptureBusy(true);
+    setDesktopCaptureError("");
+    try {
+      const bytes = await captureHud(desktopMonitors.length ? desktopMonitorIndex : undefined);
+      if (!bytes.length) throw new Error("empty capture");
+      const file = new File([new Uint8Array(bytes)], "counterlock-local-scoreboard.png", { type: "image/png" });
+      openImporter("auto");
+      await readScreenshot(file, "auto");
+    } catch {
+      setDesktopCaptureError("Could not capture the game screen. Check screenshot permission and keep the scoreboard visible.");
+    } finally {
+      setDesktopCaptureBusy(false);
+    }
+  }
+  function cycleCaptureMonitor() {
+    if (desktopMonitors.length < 2) return;
+    const next = (desktopMonitorIndex + 1) % desktopMonitors.length;
+    setDesktopMonitorIndex(next);
+    window.localStorage.setItem("counterlock-capture-monitor", String(next));
+  }
   function accountIdFromSteamInput(value: string) {
     const trimmed = value.trim();
     const profileNumber = trimmed.match(/steamcommunity\.com\/profiles\/(\d+)/i)?.[1];
@@ -814,6 +961,10 @@ export default function Home() {
       if (detectedOwn) { setHeroId(detectedHeroId); if (detectedOwn.playerName) window.localStorage.setItem("counterbuild-player-name", normalizeText(detectedOwn.playerName)); }
       if (allies.length) setAllyIds(allies);
       if (enemies.length) { setEnemyIds(enemies); if (!enemies.includes(carryId)) setCarryId(enemies[0]); }
+      if (desktopAvailable() && desktopStatus?.in_game && detectedOwn && enemies.length) {
+        void submitLocalRoster({ own_hero_id: detectedHeroId, ally_hero_ids: allies, enemy_hero_ids: enemies })
+          .catch((error) => setDesktopCaptureError(String(error)));
+      }
       const detectedAssignments: Record<number, Exclude<Lane, "all">> = {}; selected.forEach((entry) => { if (entry.lane) detectedAssignments[entry.id] = entry.lane; }); if (Object.keys(detectedAssignments).length) setLaneAssignments(detectedAssignments);
       const ownDetection = detectedOwn; const detectedLane = ownDetection?.lane;
       if (detectedLane) { selectLane(detectedLane); const opponent = selected.find((entry) => entry.side === "enemy" && entry.lane === detectedLane); if (opponent) setLaneOpponentId(opponent.id); }
@@ -824,7 +975,7 @@ export default function Home() {
   }
 
   useEffect(() => {
-    const handlePaste = (event: ClipboardEvent) => { const file = Array.from(event.clipboardData?.items ?? []).find((entry) => entry.kind === "file" && entry.type.startsWith("image/"))?.getAsFile() ?? Array.from(event.clipboardData?.files ?? []).find((entry) => entry.type.startsWith("image/")); if (!file) return; event.preventDefault(); setImportTarget("auto"); setImporterOpen(true); void readScreenshot(file, "auto"); };
+    const handlePaste = (event: ClipboardEvent) => { if (desktopAvailable()) return; const file = Array.from(event.clipboardData?.items ?? []).find((entry) => entry.kind === "file" && entry.type.startsWith("image/"))?.getAsFile() ?? Array.from(event.clipboardData?.files ?? []).find((entry) => entry.type.startsWith("image/")); if (!file) return; event.preventDefault(); setImportTarget("auto"); setImporterOpen(true); void readScreenshot(file, "auto"); };
     window.addEventListener("paste", handlePaste); return () => window.removeEventListener("paste", handlePaste);
   });
   async function copyTopBuild() {
@@ -863,11 +1014,12 @@ export default function Home() {
     })) as Record<"yellow" | "blue" | "green", number | null>;
   }, [allyTeamIds, enemyIds, laneAssignments, laneCounterStats]);
   return (
-    <main>
+    <main className={desktopStatus ? "desktop-shell" : undefined}>
       <header className="site-header">
         <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></a>
         <div className="header-actions">
           <div className={`live-pill companion-${companionStatus}`}><span /> {companionStatus === "connected" ? t.companionConnected : companionStatus === "waiting" ? t.companionSearching : t.companionUnavailable}</div>
+          {desktopAvailable() && <button className="header-button" type="button" onClick={() => setDesktopTab("system")}>{lang === "de" ? "EINSTELLUNGEN" : "SETTINGS"}</button>}
           <button className="header-button patch-button" type="button" onClick={() => void showLatestPatch()}>{t.latestPatch}</button>
           <button className="header-button theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-pressed={darkMode}>{darkMode ? `☾ ${t.darkMode}` : `☀ ${t.lightMode}`}</button>
           <div className="language-toggle" aria-label="Language / Sprache">
@@ -876,15 +1028,23 @@ export default function Home() {
           </div>
         </div>
       </header>
+      {desktopStatus && <nav className="desktop-tabs" aria-label="Desktop views">{(["match", "build", "system"] as const).map((tab) => <button key={tab} type="button" className={desktopTab === tab ? "active" : ""} aria-current={desktopTab === tab ? "page" : undefined} onClick={() => setDesktopTab(tab)}>{tab === "match" ? "CURRENT MATCH" : tab === "build" ? "BUILD LAB" : "SYSTEM"}</button>)}</nav>}
       {patchOpen && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
 
-      <section className="hero-section" id="top">
+      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} advice={desktopAdvice} onOpenBuild={() => setDesktopTab("build")} />}
+      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={ownedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} />}
+      {desktopStatus && desktopTab === "system" && <section className="desktop-system-page" aria-label="System diagnostics"><div className="desktop-system-heading"><small>COUNTERLOCK / SYSTEM</small><h1>System & diagnostics</h1><p>Runtime details and local desktop preferences.</p></div><div className="desktop-system-grid">
+        <article><h2>Game connection</h2><dl><div><dt>Deadlock</dt><dd>{desktopStatus.game_running ? "Running" : "Not running"}</dd></div><div><dt>Process ID</dt><dd>{desktopStatus.pid ?? "—"}</dd></div><div><dt>Steam build</dt><dd>{desktopStatus.build_id ?? "Unknown"}</dd></div><div><dt>Live source</dt><dd>{desktopStatus.provider}</dd></div><div><dt>Console phase</dt><dd>{desktopStatus.console_phase ?? "No verified event"}</dd></div><div><dt>Match ID</dt><dd>{desktopStatus.match_id ?? "Unavailable"}</dd></div><div><dt>Inventory</dt><dd>{desktopStatus.capabilities.items ? "Available" : "Not available"}</dd></div><div><dt>Install path</dt><dd>{desktopStatus.installation_path ?? "Not detected"}</dd></div></dl>{desktopStatus.last_error && <p className="desktop-system-error">{desktopStatus.last_error}</p>}{desktopLastMatch && <p className="desktop-system-note">Last match: {desktopLastMatch.match_id ?? "ID unknown"} · {desktopLastMatch.source}</p>}</article>
+        <article><h2>Desktop settings</h2><label><input type="checkbox" checked={desktopPreferences?.close_to_tray ?? true} onChange={(event) => void updateDesktopPreferences({ close_to_tray: event.target.checked })} />{lang === "de" ? "Beim Schließen im Tray weiterlaufen" : "Keep running in tray when closing"}</label><label><input type="checkbox" checked={desktopPreferences?.compact_always_on_top ?? true} onChange={(event) => void updateDesktopPreferences({ compact_always_on_top: event.target.checked })} />{lang === "de" ? "Kompaktfenster immer im Vordergrund" : "Keep compact window always on top"}</label><p>Game memory is read locally. Screenshots and unspent shop balance are separate capabilities.</p><hr /><h2>{lang === "de" ? "Software-Updates" : "Software updates"}</h2><button type="button" disabled={updateBusy} onClick={() => void checkDesktopUpdates()}>{updateBusy ? (lang === "de" ? "BITTE WARTEN …" : "PLEASE WAIT…") : (lang === "de" ? "NACH UPDATES SUCHEN" : "CHECK FOR UPDATES")}</button>{updateStatus && <p role="status">{updateStatus}</p>}</article>
+      </div></section>}
+      {!desktopStatus && <section className="hero-section" id="top">
         <div className="eyebrow">{t.heroKicker}</div>
         <h1>{t.heroTitleA}<br /><em>{t.heroTitleB}</em></h1>
         <p>{t.heroText}</p>
-      </section>
+      </section>}
 
-      <section className="match-import-bar"><div><span>▣</span><p><strong>{t.matchImport}</strong><small>{t.matchImportText}</small></p></div><div className="match-import-actions"><button className="screenshot-primary" type="button" onClick={() => openImporter("auto")}>{t.screenshotImport} <b>CTRL+V</b></button><button className="live-match-secondary" type="button" onClick={toggleLiveImport}>{t.liveImport} →</button></div></section>
+      <div className="desktop-build-content" style={{ display: desktopStatus ? "none" : undefined }}>
+      <section className="match-import-bar"><div><span>▣</span><p><strong>{t.matchImport}</strong><small>{desktopAvailable() ? (desktopStatus?.provider === "attached" ? "Reading your current match from Deadlock memory. Scoreboard capture is optional." : "Waiting for a verified memory profile or local match event. Scoreboard capture is optional.") : t.matchImportText}</small>{desktopCaptureError && <small role="alert">{desktopCaptureError}</small>}</p></div><div className="match-import-actions"><button className="screenshot-primary" type="button" onClick={() => openImporter("auto")}>{t.screenshotImport} <b>CTRL+V</b></button>{desktopAvailable() ? <>{desktopMonitors.length > 1 && <button className="live-match-secondary" type="button" title={desktopMonitors[desktopMonitorIndex] ? `${desktopMonitors[desktopMonitorIndex].name} · ${desktopMonitors[desktopMonitorIndex].width}×${desktopMonitors[desktopMonitorIndex].height}` : "Choose display"} onClick={cycleCaptureMonitor}>SCREEN {desktopMonitorIndex + 1}/{desktopMonitors.length}</button>}<button className="live-match-secondary" type="button" disabled={desktopCaptureBusy} onClick={() => void captureCurrentScoreboard()}>{desktopCaptureBusy ? "CAPTURING…" : "CAPTURE GAME SCREEN"} →</button></> : <button className="live-match-secondary" type="button" onClick={toggleLiveImport}>{t.liveImport} →</button>}</div></section>
 
       {liveImportOpen && <section className="live-import-panel" aria-labelledby="live-import-title">
         <button className="live-import-close" type="button" onClick={() => setLiveImportOpen(false)} aria-label={t.closeLiveImport}>×</button>
@@ -954,7 +1114,8 @@ export default function Home() {
         <div className="results-heading"><div><div className="eyebrow">{t.liveRec}</div><h2>{t.bestBuys} <span>{t.against} {buyTarget === "team" ? t.enemyLineup : carryHero?.name}</span></h2></div><div className="result-controls"><div className="buy-target-switch" aria-label={t.buyTarget}><small>{t.buyTarget}</small><div><button className={buyTarget === "carry" ? "active" : ""} type="button" onClick={() => setBuyTarget("carry")}>{t.vsCarryMode}</button><button className={buyTarget === "team" ? "active" : ""} type="button" onClick={() => setBuyTarget("team")}>{t.vsTeamMode}</button></div></div><div className="result-actions"><button className={`copy-build full-build-trigger ${showFullBuild ? "active" : ""}`} type="button" onClick={() => setShowFullBuild((current) => !current)}>{showFullBuild ? t.hideFullBuild : t.showFullBuild}</button><button className="copy-build" onClick={shareMatchup}>{linkCopied ? t.linkCopied : t.share}</button><button className="copy-build" onClick={copyTopBuild} disabled={!visibleRecommendations.length}>{copied ? t.copied : t.copyBuild}</button></div></div></div>
 
         <section className="in-match-tools">
-          <article className="next-buy-card">{nextBuy ? <><div className="next-buy-icon">{nextBuy.item.shop_image_webp ? <img src={nextBuy.item.shop_image_webp} alt="" /> : "◆"}</div><div><small>{t.nextBuy}</small><strong>{nextBuy.item.name}</strong><p>{t.nextBuyText} · ◈ {nextBuy.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</p><b className={(nextBuy.item.cost ?? 0) <= souls ? "buy-ready" : "buy-saving"}>{(nextBuy.item.cost ?? 0) <= souls ? t.affordable : `${t.needSouls}: ◈ ${((nextBuy.item.cost ?? 0) - souls).toLocaleString(lang === "de" ? "de-DE" : "en-US")}`}</b></div></> : <><div className="next-buy-icon">◆</div><div><small>{t.nextBuy}</small><strong>—</strong><p>{ownedItemIds.length ? t.duplicatePlan : ""}</p></div></>}</article>
+          <article className="next-buy-card">{nextBuy ? <><div className="next-buy-icon">{nextBuy.item.shop_image_webp ? <img src={nextBuy.item.shop_image_webp} alt="" /> : "◆"}</div><div><small>{t.nextBuy}</small><strong>{nextBuy.item.name}</strong><p>{liveAdvice?.reason ?? t.nextBuyText} · ◈ {nextBuy.item.cost?.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</p><b className={(nextBuy.item.cost ?? 0) <= souls ? "buy-ready" : "buy-saving"}>{desktopSoulsKnown === false || (liveAdvice && liveAdvice.affordable == null) ? "Live souls unavailable" : (nextBuy.item.cost ?? 0) <= souls ? t.affordable : `${t.needSouls}: ◈ ${((nextBuy.item.cost ?? 0) - souls).toLocaleString(lang === "de" ? "de-DE" : "en-US")}`}</b></div></> : <><div className="next-buy-icon">◆</div><div><small>{t.nextBuy}</small><strong>—</strong><p>{desktopStatus?.in_game ? "Awaiting verified match recommendation" : ownedItemIds.length ? t.duplicatePlan : ""}</p></div></>}</article>
+          {desktopStatus?.in_game && Boolean(desktopAdvice?.alternatives.length) && <div className="desktop-advice-alternatives"><small>{lang === "de" ? "ALTERNATIVEN" : "ALTERNATIVES"}</small>{desktopAdvice?.alternatives.map((item) => <span key={item.item_id}>{item.name} · ◈ {item.cost.toLocaleString(lang === "de" ? "de-DE" : "en-US")}</span>)}</div>}
           <div className="context-controls"><div><small>{t.matchState}</small><div className="segmented">{(["ahead", "even", "behind"] as const).map((state) => <button className={matchState === state ? "active" : ""} type="button" key={state} onClick={() => updateContext(() => setMatchState(state))}>{t[state]}</button>)}</div></div><div><small>{t.buildPath}</small><div className="segmented">{(["balanced", "safe", "greedy"] as const).map((style) => <button className={buildStyle === style ? "active" : ""} type="button" key={style} onClick={() => updateContext(() => setBuildStyle(style))}>{t[style]}</button>)}</div></div></div>
           <div className="threat-controls"><small>{t.threats}</small><div>{(["healing", "weapon", "spirit", "crowdControl"] as const).map((threat) => <button className={threats[threat] ? "active" : ""} type="button" key={threat} onClick={() => updateContext(() => setThreats((current) => ({ ...current, [threat]: !current[threat] })))}>{t[threat === "weapon" ? "weaponDamage" : threat === "spirit" ? "spiritDamage" : threat]}</button>)}</div><label className="souls-input"><span>{t.souls}</span><input type="number" min="0" value={souls || ""} onChange={(event) => setSouls(Math.max(0, Number(event.target.value)))} placeholder="0" /></label></div>
         </section>
@@ -1003,6 +1164,7 @@ export default function Home() {
       {selectedEnemyInsight && <aside className="enemy-detail-modal" role="dialog" aria-modal="true" aria-label={t.enemyDetails}><button type="button" onClick={() => setSelectedEnemySignal(null)}>{t.closeDetails} ×</button><div><HeroPortrait hero={heroMap.get(selectedEnemyInsight.heroId)} /><div><small>{t.enemyDetails}</small><h3>{heroMap.get(selectedEnemyInsight.heroId)?.name}</h3></div></div><small>{t.commonBuild}</small>{selectedEnemyInsight.items.map(({ item, stat }) => <article key={item.id}><div>{item.shop_image_webp ? <img src={item.shop_image_webp} alt="" /> : "◆"}</div><strong>{item.name}</strong><span>{formatMatches(stat.matches, lang)} {t.games}</span></article>)}</aside>}
 
       <footer><div className="brand"><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></div><p>{t.footer} <a href="https://deadlock-api.com/" target="_blank" rel="noreferrer">Deadlock API</a> {t.disclaimer}</p></footer>
+      </div>
 
       {allyPickerOpen && <div className="import-overlay hero-picker-overlay" role="dialog" aria-modal="true" aria-labelledby="ally-picker-title">
         <div className="import-modal hero-picker-modal ally-picker-modal">
