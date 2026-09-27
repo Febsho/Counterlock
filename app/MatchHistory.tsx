@@ -7,17 +7,20 @@ import { MatchLibrary } from "./components/match-history/MatchLibrary";
 import { orderedMatches } from "./lib/match-history";
 
 type PendingMatch = PendingMatchRecord & { matchId: number };
-type Props = { outcomes: RecommendationOutcome[]; pendingMatches?: PendingMatch[]; accountId?: number | null; playerName?: string | null; heroNames: Map<number, string>; itemNames: Map<number, string>; itemCategories?: Map<number, string>; heroImages?: Map<number, string>; itemImages?: Map<number, string>; initialReview?: boolean };
+export type SteamHistoryProfile = { account_id: number; personaname: string; profileurl: string; avatar: string };
+type Props = { outcomes: RecommendationOutcome[]; pendingMatches?: PendingMatch[]; accountId?: number | null; playerName?: string | null; onLinkSteamProfile?: (profile: SteamHistoryProfile) => void; onForgetSteamProfile?: () => void; heroNames: Map<number, string>; itemNames: Map<number, string>; itemCategories?: Map<number, string>; heroImages?: Map<number, string>; itemImages?: Map<number, string>; initialReview?: boolean };
 
-export function MatchHistory({ outcomes, pendingMatches = [], accountId, playerName, heroNames, itemNames, itemCategories, heroImages, itemImages, initialReview = false }: Props) {
+export function MatchHistory({ outcomes, pendingMatches = [], accountId, playerName, onLinkSteamProfile, onForgetSteamProfile, heroNames, itemNames, itemCategories, heroImages, itemImages, initialReview = false }: Props) {
   const [apiMatches, setApiMatches] = useState<RecommendationOutcome[]>([]);
   const [statlockerMatches, setStatlockerMatches] = useState<RecommendationOutcome[]>([]);
   const [historyStatus, setHistoryStatus] = useState<"loading" | "connected" | "local" | "unavailable" | "not_configured">("loading");
   const localMatchIdKey = outcomes.map((match) => match.matchId).sort((a, b) => a - b).join(",");
   useEffect(() => {
     if (!accountId || typeof window === "undefined") { setHistoryStatus("not_configured"); return; }
+    setApiMatches([]); setStatlockerMatches([]);
     let active = true;
     const load = async () => {
+      setHistoryStatus("loading");
       try {
         const response = await fetch(`https://api.deadlock-api.com/v1/players/${accountId}/match-history`);
         if (!response.ok) throw new Error("History lookup failed");
@@ -76,7 +79,7 @@ export function MatchHistory({ outcomes, pendingMatches = [], accountId, playerN
   const selected = sorted.find((match) => match.matchId === selectedId) ?? null;
   return <section className="match-history-page" aria-label={selected ? "Match review" : "My matches"}>
     {selected ? <MatchReview match={selected} heroNames={heroNames} itemNames={itemNames} itemCategories={itemCategories} heroImages={heroImages} itemImages={itemImages} onBack={() => setSelectedId(null)} /> :
-      <MatchLibrary outcomes={sorted} pendingMatches={pendingMatches} heroNames={heroNames} itemNames={itemNames} heroImages={heroImages} itemImages={itemImages} historyStatus={historyStatus} onSelect={(id) => setSelectedId(id)} />}
+      <MatchLibrary outcomes={sorted} pendingMatches={pendingMatches} heroNames={heroNames} itemNames={itemNames} heroImages={heroImages} itemImages={itemImages} historyStatus={historyStatus} accountId={accountId} playerName={playerName} onLinkSteamProfile={onLinkSteamProfile} onForgetSteamProfile={onForgetSteamProfile} onSelect={(id) => setSelectedId(id)} />}
   </section>;
 }
 

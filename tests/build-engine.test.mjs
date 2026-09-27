@@ -257,11 +257,14 @@ test("Statlocker batch match proxy keeps API key server-side and maps rate limit
 test("Statlocker profile route never needs a client-supplied key and handles disabled configuration", async () => {
   const { POST } = await import("../app/api/statlocker/profiles/route.ts");
   const original = process.env.STATLOCKER_API_KEY;
+  const originalFetch = globalThis.fetch;
   delete process.env.STATLOCKER_API_KEY;
+  globalThis.fetch = async () => new Response("<profile><steamID><![CDATA[FredK]]></steamID><avatarMedium>https://steamcdn.example/avatar.jpg</avatarMedium></profile>", { status: 200 });
   try {
     const response = await POST(new Request("http://localhost/api/statlocker/profiles", { method: "POST", body: JSON.stringify([123]) }));
-    assert.deepEqual(await response.json(), { status: "not_configured", profiles: [] });
+    assert.deepEqual(await response.json(), { status: "not_configured", profiles: [{ accountId: 123, name: "FredK", avatarUrl: "https://steamcdn.example/avatar.jpg", ppScore: null, estimatedRankNumber: null, region: null }] });
   } finally {
+    globalThis.fetch = originalFetch;
     if (original === undefined) delete process.env.STATLOCKER_API_KEY;
     else process.env.STATLOCKER_API_KEY = original;
   }

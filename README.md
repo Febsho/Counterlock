@@ -58,7 +58,7 @@ Updater signing is required. A keypair has been created at
 configuration. With GitHub CLI installed and authenticated, you can set it with
 `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/counterlock.key`. Then
 create a version tag matching `src-tauri/tauri.conf.json`, for example
-`v0.1.8`. If you password-protect the key, also add
+`v0.1.9`. If you password-protect the key, also add
 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 
 Desktop live-match detection uses the running game and its local `console.log`,
