@@ -14,9 +14,13 @@ import { scoreThreats } from "./lib/build-engine/threat-score";
 import { buildUpgradeGraph } from "./lib/build-engine/upgrade-graph";
 import { optimizeSlots } from "./lib/build-engine/slot-optimizer";
 import { findSellDecisions, planPurchasePath, rankNextBuys, type PlanCandidate } from "./lib/build-engine/planner";
+import { buildDeviation, shouldPreservePowerSpike } from "./lib/match-intelligence/deviation";
+import { counterCoverage } from "./lib/match-intelligence/counter-coverage";
 import { fetchStatlockerProfiles, syncPersonalHeroProfile, type StatlockerProfile, type StatlockerStatus } from "./lib/data/statlocker";
 import { personalSignals, personalSequencePrior, rankCohort, rankDataHasCoverage, type PersonalHeroProfile } from "./lib/build-engine/personal-profile";
 import { completeRecommendationOutcome, recommendationOutcomeCache, recordRecommendationSnapshot } from "./lib/data/recommendation-outcomes";
+import { MatchHistory } from "./MatchHistory";
+import { laneBuyScore, laneState } from "./lib/match-intelligence/lane";
 
 const API = "https://api.deadlock-api.com/v1";
 
@@ -46,7 +50,7 @@ type ItemStat = { item_id: number; wins: number; losses: number; matches: number
 type EnemyBuildSignal = { heroId: number; stats: ItemStat[] };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
-type Recommendation = { item: Item; carryScore: number; teamScore: number; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; exactMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[]; advisorReason?: string; coreFit?: number; counterFit?: number; counterUrgency?: number; mechanicFit?: number; exactFit?: number; personalFit?: number; threatTargets?: number[] };
+type Recommendation = { item: Item; carryScore: number; teamScore: number; laneFit?: number; coveredEnemyIds?: number[]; teamRate: number; baselineRate: number; carryRate: number; carryMatches: number; teamMatches: number; exactMatches: number; carryBuyTime: number; teamBuyTime: number; enemyRates: EnemyItemRate[]; advisorReason?: string; coreFit?: number; counterFit?: number; counterUrgency?: number; mechanicFit?: number; exactFit?: number; personalFit?: number; threatTargets?: number[] };
 type Detection = { id: number; confidence: number; x?: number; y?: number; side?: "ally" | "enemy"; lane?: Exclude<Lane, "all">; isOwn?: boolean; playerName?: string };
 type OcrWord = { text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } };
 type ScoreboardSheet = { canvas: HTMLCanvasElement; rowHeight: number };
@@ -365,6 +369,7 @@ export default function Home() {
   const [statlockerStatus, setStatlockerStatus] = useState<StatlockerStatus>("not_configured");
   const [liveProfiles, setLiveProfiles] = useState<Record<number, StatlockerProfile>>({});
   const [personalHeroProfile, setPersonalHeroProfile] = useState<PersonalHeroProfile | null>(null);
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [copied, setCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [darkMode, setDarkMode] = useState(true);
@@ -384,7 +389,9 @@ export default function Home() {
   const [desktopLiveMatch, setDesktopLiveMatch] = useState<DesktopMatch | null>(null);
   const [desktopSoulsKnown, setDesktopSoulsKnown] = useState<boolean | null>(null);
   const [desktopPreferences, setDesktopPreferences] = useState<DesktopPreferences | null>(null);
-  const [desktopTab, setDesktopTab] = useState<"match" | "build" | "system">("match");
+  const [desktopTab, setDesktopTab] = useState<"match" | "build" | "review" | "history" | "system">("match");
+  const [matchCompleteNotice, setMatchCompleteNotice] = useState<{ matchId: number; ready: boolean } | null>(null);
+  const [unseenReviewMatchId, setUnseenReviewMatchId] = useState<number | null>(null);
   const [desktopLastMatch, setDesktopLastMatch] = useState<DesktopMatch | null>(null);
   const [desktopAdvice, setDesktopAdvice] = useState<DesktopAdvice | null>(null);
   const [desktopOwnedItemIds, setDesktopOwnedItemIds] = useState<number[]>([]);
@@ -400,12 +407,18 @@ export default function Home() {
   const ownAccountId = desktopLiveMatch?.account_id ?? savedSteamProfile?.account_id ?? null;
 
   useEffect(() => {
+    if (!matchCompleteNotice) return;
+    const timer = window.setTimeout(() => setMatchCompleteNotice(null), 9000);
+    return () => window.clearTimeout(timer);
+  }, [matchCompleteNotice]);
+
+  useEffect(() => {
     const profile = ownAccountId == null ? null : playerProfiles[ownAccountId];
     if (!profile || !heroId) return;
     let active = true;
     void syncPersonalHeroProfile(ownAccountId!, heroId, profile).then((result) => { if (active) setPersonalHeroProfile(result); });
     return () => { active = false; };
-  }, [heroId, ownAccountId, playerProfiles]);
+  }, [heroId, historyRevision, ownAccountId, playerProfiles]);
 
   useEffect(() => {
     if (!profileRosterKey) return;
@@ -578,9 +591,18 @@ export default function Home() {
         desktopSnapshotGapRef.current = window.setTimeout(() => {
           desktopSnapshotGapRef.current = null;
           if (!active) return;
+          const endedMatchId = desktopSnapshotRef.current?.match_id;
           desktopSnapshotRef.current = null; setDesktopLiveMatch(null); desktopRosterKeyRef.current = null;
           setDesktopSoulsKnown(null); setDesktopOwnedItemIds([]); setDesktopAdvice(null);
-          void getLastMatch().then((last) => active && setDesktopLastMatch(last));
+          void getLastMatch().then((last) => {
+            if (!active) return;
+            setDesktopLastMatch(last);
+            if (endedMatchId && last?.match_id === endedMatchId) {
+              const accountId = last.account_id ?? savedSteamProfile?.account_id;
+              const completed = accountId ? recommendationOutcomeCache(accountId, window.localStorage).completed[endedMatchId] : null;
+              setMatchCompleteNotice({ matchId: endedMatchId, ready: Boolean(completed) });
+            }
+          });
         }, 12_000);
         return;
       }
@@ -723,6 +745,7 @@ export default function Home() {
         livePurchaseParams.set("max_bought_at_s", String(windowCenter + 600));
       }
       const laneCounterParams = new URLSearchParams(commonParams); laneCounterParams.set("same_lane_filter", "true");
+      const laneItemParams = new URLSearchParams(commonParams); laneItemParams.set("same_lane_filter", "true"); laneItemParams.set("min_bought_at_s", "0"); laneItemParams.set("max_bought_at_s", "600");
       const responses = await Promise.allSettled([
         cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(common))),
         cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), enemyIds, true)),
@@ -732,6 +755,7 @@ export default function Home() {
         Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(matchupCommon), [enemyId])))),
         Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(enemyId, new URLSearchParams(common))))),
         livePurchaseParams ? Promise.allSettled(enemyIds.map((enemyId) => cachedJson<ItemStat[]>(itemStatsUrl(heroId, new URLSearchParams(livePurchaseParams), [enemyId])))) : Promise.resolve([]),
+        effectiveGameTimeSeconds < 600 && enemyIds.includes(laneOpponentId) ? cachedJson<ItemStat[]>(itemStatsUrl(heroId, laneItemParams, [laneOpponentId])) : Promise.resolve([] as ItemStat[]),
       ] as const);
       const unwrap = <T,>(result: PromiseSettledResult<T>, label: string, fallback: T): T => {
         if (result.status === "fulfilled") return result.value;
@@ -756,6 +780,7 @@ export default function Home() {
       const individualEnemyStats = settlePerEnemy(unwrap(responses[5], "individual enemy item stats", []), "individual enemy item stats");
       const enemyBuildStats = settlePerEnemy(unwrap(responses[6], "common enemy item stats", []), "common enemy item stats");
       const livePurchaseStats = settlePerEnemy(unwrap(responses[7], "live purchase-time matchup statistics", []), "live purchase-time matchup statistics");
+      const laneItemStats = unwrap(responses[8], "same-lane early item statistics", [] as ItemStat[]);
       const flowQuery = new URLSearchParams(commonParams); flowQuery.set("hero_ids", String(heroId));
       const flowResult = await Promise.allSettled([itemFlowStats(`${API}/analytics/item-flow-stats?${flowQuery}`)]);
       if (runId !== analysisRunRef.current) return;
@@ -787,8 +812,14 @@ export default function Home() {
         const carryConfidence = carryMatches ? Math.min(1, Math.log10(Math.max(10, carryMatches)) / 4.7) : 0;
         const carryUplift = Math.max(-0.06, Math.min(0.06, carryRate - baselineRate));
         const enemyRates = enemyIds.map((enemyId, index) => { const stat = individualEnemyMaps[index].get(item.id); const rate = adjustedRate(stat); return stat ? { heroId: enemyId, rate, matches: stat.matches, lift: rate - baselineRate } : null; }).filter((entry): entry is EnemyItemRate => Boolean(entry)).sort((a, b) => b.lift - a.lift);
-        return { item, carryScore: (carryRate * .65 + winRate * .15 + baselineRate * .2 + carryUplift * .35) * carryConfidence + baselineRate * (1 - carryConfidence), teamScore: 0, teamRate: winRate, baselineRate, carryRate, carryMatches, teamMatches: Math.max(team?.matches ?? 0, ...enemyRates.map((rate) => rate.matches)), exactMatches: team?.matches ?? 0, carryBuyTime: carry?.avg_buy_time_s ?? carryItemEvidence?.avg_buy_time_s ?? base?.avg_buy_time_s ?? 0, teamBuyTime: team?.avg_buy_time_s ?? base?.avg_buy_time_s ?? 0, enemyRates } satisfies Recommendation;
-      }).filter((value): value is Recommendation => Boolean(value));
+        const laneStat = laneItemStats.find(stat => stat.item_id === item.id);
+        const liveOwnNow = desktopLiveMatch?.players.find(player => player.account_id != null && player.account_id === desktopLiveMatch.account_id);
+        const laneEnemyNow = desktopLiveMatch?.players.find(player => player.hero_id === laneOpponentId);
+        const lane = laneState(liveOwnNow?.net_worth ?? null, [laneEnemyNow?.net_worth ?? null]);
+        const laneIntentWeight = effectiveGameTimeSeconds < 600 ? 1 : 0;
+        const laneFit = laneStat ? laneBuyScore({ matchupFit: Math.max(0, adjustedRate(laneStat)-baselineRate)*10, earlyHeroFit: item.item_tier===1?1:.35, sustainNeed: lane==="behind"&&item.item_slot_type==="vitality"?.8:.25, pressureFit: lane==="ahead"&&(item.item_slot_type==="weapon"||item.item_slot_type==="spirit")?.8:.3, earlyTimingFit: laneStat.avg_buy_time_s<=600?1:.35, affordabilityFit: (item.cost??99999)<=1500?.8:.3, lanePowerSpikeFit: item.item_tier===1?.75:.25, deviationPenalty: .02, gameTimeSeconds:effectiveGameTimeSeconds })*laneIntentWeight:0;
+        return { item, carryScore: (carryRate * .65 + winRate * .15 + baselineRate * .2 + carryUplift * .35) * carryConfidence + baselineRate * (1 - carryConfidence) + laneFit, teamScore: 0, laneFit, teamRate: winRate, baselineRate, carryRate, carryMatches, teamMatches: Math.max(team?.matches ?? 0, ...enemyRates.map((rate) => rate.matches)), exactMatches: team?.matches ?? 0, carryBuyTime: carry?.avg_buy_time_s ?? carryItemEvidence?.avg_buy_time_s ?? base?.avg_buy_time_s ?? 0, teamBuyTime: team?.avg_buy_time_s ?? base?.avg_buy_time_s ?? 0, enemyRates } satisfies Recommendation;
+      }).filter((value): value is NonNullable<typeof value> => Boolean(value));
       const liveOwn = desktopLiveMatch?.players.find((player) => player.account_id != null && player.account_id === desktopLiveMatch.account_id);
       const liveEnemies = desktopLiveMatch?.players.filter((player) => liveOwn?.team != null && player.team != null && player.team !== liveOwn.team && player.hero_id != null) ?? [];
       const ppByAccount = new Map(Object.values(playerProfiles).map((profile) => [profile.accountId, profile.ppScore]));
@@ -803,11 +834,15 @@ export default function Home() {
         return all;
       }, {} as Record<string, number>);
       const personal = personalSignals(personalHeroProfile?.heroId === heroId && personalHeroProfile.accountId === ownAccountId ? personalHeroProfile : null);
+      const coverageByItem = new Map(calculated.map(entry => {
+        const coverage = counterCoverage(threatInputs.map(enemy => { const player=liveByHero.get(enemy.heroId); return {...enemy,accountId:player?.account_id??null,playerName:player?.account_id==null?null:playerProfiles[player.account_id]?.name??null}; }), new Map(enemyIds.map(enemyId => [enemyId,{strength:Math.max(counterCapability(entry.item.class_name,enemyThreatProfiles.get(enemyId)??{}),tagMatchesManualThreat(entry.item.class_name,{...threats,healing:threats.healing||lifestealDetected}) ? 0.72 : 0),reasons:[...tagsForItem(entry.item.class_name)]}])));
+        return [entry.item.id,coverage] as const;
+      }));
       const ranked = rankItems(calculated.map((entry) => {
         const flow = flowResult[0].status === "fulfilled" ? flowResult[0].value : null;
         const core = flowCoreFit(flow, entry.item.id, itemFlowPhase(effectiveGameTimeSeconds));
         const itemThreats = { ...threats, healing: threats.healing || lifestealDetected };
-        const mechanicFit = Math.max(counterCapability(entry.item.class_name, weightedThreatProfile), tagMatchesManualThreat(entry.item.class_name, itemThreats) ? 0.72 : 0);
+        const mechanicFit = Math.max(counterCapability(entry.item.class_name, weightedThreatProfile), tagMatchesManualThreat(entry.item.class_name, itemThreats) ? 0.72 : 0,coverageByItem.get(entry.item.id)?.weightedThreatCoverage??0);
         const preferenceFit = (buildStyle === "safe" && entry.item.item_slot_type === "vitality") ||
           (buildStyle === "greedy" && (entry.item.cost ?? 0) >= 3200) ||
           (matchState === "behind" && entry.item.item_slot_type === "vitality") ||
@@ -832,14 +867,14 @@ export default function Home() {
           enemyRates: entry.enemyRates.filter((rate) => rate.heroId === carryId).map(({ heroId, rate, matches }) => ({ heroId, rate, matches })) };
       }), carryThreats, effectiveGameTimeSeconds, personal);
       const carryRankedById = new Map(carryRanked.map((entry) => [entry.itemId, entry]));
-      if (calculated.length) setRecommendations(calculated.map((entry) => { const scored = rankedById.get(entry.item.id); const carryScored = carryRankedById.get(entry.item.id); const selectedScore = buyTarget === "team" ? scored : carryScored; const advisorReason = selectedScore?.reason.replace(/Hero #(\d+)/g, (_match, id: string) => heroMap.get(Number(id))?.name ?? `Hero #${id}`); return { ...entry, carryScore: carryScored?.score ?? 0, teamScore: scored?.score ?? 0, advisorReason, coreFit: selectedScore?.coreFit, counterFit: selectedScore?.counterFit, counterUrgency: selectedScore?.counterUrgency, mechanicFit: selectedScore?.mechanicFit, exactFit: selectedScore?.exactFit, personalFit: selectedScore?.personalFit, threatTargets: selectedScore?.threatTargets }; }));
+      if (calculated.length) setRecommendations(calculated.map((entry) => { const scored = rankedById.get(entry.item.id); const carryScored = carryRankedById.get(entry.item.id); const selectedScore = buyTarget === "team" ? scored : carryScored; const advisorReason = selectedScore?.reason.replace(/Hero #(\d+)/g, (_match, id: string) => heroMap.get(Number(id))?.name ?? `Hero #${id}`); return { ...entry, coveredEnemyIds:coverageByItem.get(entry.item.id)?.coveredEnemies.map(enemy=>enemy.heroId)??[],carryScore: (carryScored?.score ?? 0) + (entry.laneFit ?? 0), teamScore: (scored?.score ?? 0) + (entry.laneFit ?? 0), advisorReason: entry.laneFit ? `Same-lane early timing and matchup fit. ${advisorReason ?? ""}` : advisorReason, coreFit: selectedScore?.coreFit, counterFit: selectedScore?.counterFit, counterUrgency: selectedScore?.counterUrgency, mechanicFit: selectedScore?.mechanicFit, exactFit: selectedScore?.exactFit, personalFit: selectedScore?.personalFit, threatTargets: selectedScore?.threatTargets }; }));
       setAllCounterStats(counterStats);
       setLaneCounterStats(laneStats);
       setMatchup(counterStats.find((stat) => stat.hero_id === heroId && stat.enemy_hero_id === carryId) ?? null);
       setUpdatedAt(new Date());
     } catch (error) { console.warn("Counterlock analysis failed; inspect Deadlock API responses and match inputs.", error); if (runId === analysisRunRef.current) setError(copy[lang].statsError); }
     finally { if (runId === analysisRunRef.current) setLoading(false); }
-  }, [buildStyle, buyTarget, carryId, dataWindow, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, enemyIds, heroId, heroMap, items, laneOnly, lang, lifestealDetected, matchState, ownAccountId, personalHeroProfile, playerProfiles, queueMode, threats]);
+  }, [buildStyle, buyTarget, carryId, dataWindow, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, enemyIds, heroId, heroMap, items, laneOpponentId, laneOnly, lang, lifestealDetected, matchState, ownAccountId, personalHeroProfile, playerProfiles, queueMode, threats]);
 
   useEffect(() => {
     if (!desktopAvailable()) return;
@@ -861,7 +896,9 @@ export default function Home() {
     ...(desktopStatus?.in_game && desktopAdvice?.inventory_known && desktopAdvice.match_id === desktopLiveMatch?.match_id ? desktopOwnedItemIds : []),
   ])), [desktopAdvice?.inventory_known, desktopAdvice?.match_id, desktopLiveMatch?.match_id, desktopOwnedItemIds, desktopStatus?.in_game, ownedItemIds]);
   const ownedItemClasses = useMemo(() => new Set(items.filter((item) => allOwnedItemIds.includes(item.id) && item.class_name).map((item) => item.class_name!)), [allOwnedItemIds, items]);
-  const buildRecommendations = useMemo(() => recommendations.filter((entry) => !hasCounterRoleOverlap(entry.item.class_name, ownedItemClasses)), [ownedItemClasses, recommendations]);
+  // Keep useful duplicate counter candidates in the pool; actual redundancy is a
+  // score penalty and can be overcome when the live threat still warrants stacking.
+  const buildRecommendations = recommendations;
 
   const visibleRecommendations = useMemo(() => {
     const [start, end] = phaseRanges[phase];
@@ -879,6 +916,7 @@ export default function Home() {
     const planningCandidates: PlanCandidate[] = buildRecommendations.map((entry) => ({ itemId: entry.item.id, score: values(entry).score,
       buyTime: values(entry).buyTime || null, tier: entry.item.item_tier, cost: entry.item.cost, category: entry.item.item_slot_type,
       counterUrgency: entry.counterUrgency ?? 0, coreFit: entry.coreFit ?? 0,
+      redundancyPenalty: hasCounterRoleOverlap(entry.item.class_name, ownedItemClasses) ? (entry.mechanicFit ?? 0) >= .7 ? .005 : .04 : 0,
       mechanicFit: entry.mechanicFit ?? 0, components: itemComponents.get(entry.item.id) ?? [], owned: allOwnedItemIds.includes(entry.item.id) }));
     const flow = bestFlowPath(itemFlow, 4);
     const flowSet = new Set(flow);
@@ -887,7 +925,9 @@ export default function Home() {
     const own = desktopStatus?.in_game && desktopLiveMatch ? desktopLiveMatch.players.find((player) => player.account_id != null && player.account_id === desktopLiveMatch.account_id) : null;
     const liveSouls = own?.unspent_souls ?? null;
     const activePersonalProfile = personalHeroProfile?.heroId === heroId && personalHeroProfile.accountId === ownAccountId ? personalHeroProfile : null;
-    const nextBuyOrder = rankNextBuys(pathCandidates.map((entry) => ({ ...entry, pathSynergy: Math.max(flowSet.has(entry.itemId) ? 0.08 : 0, personalSequencePrior(activePersonalProfile, allOwnedItemIds, entry.itemId)), timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - effectiveGameTimeSeconds) / 900), affordabilityUtility: entry.cost == null || liveSouls == null ? 0 : liveSouls >= entry.cost ? 1 : -Math.min(1, (entry.cost - liveSouls) / 5000), deviationCost: entry.itemId === normalCoreNextId ? 0 : flowSet.has(entry.itemId) ? 0.015 : 0.04, opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 })));
+    const nextCore = pathCandidates.find(entry => entry.itemId === normalCoreNextId);
+    const nearSpike = nextCore && liveSouls != null && nextCore.cost != null ? { itemId: nextCore.itemId, score: nextCore.coreFit, estimatedSoulsRemaining: Math.max(0,nextCore.cost-liveSouls), currentProgress: Math.max(0,Math.min(1,liveSouls/Math.max(1,nextCore.cost))), reason: "Core path item-flow timing" } : null;
+    const nextBuyOrder = rankNextBuys(pathCandidates.map((entry) => { const deviation = buildDeviation({normalNextItemId:normalCoreNextId,candidateItemId:entry.itemId,delayedItems:entry.itemId===normalCoreNextId?[]:[normalCoreNextId??0].filter(Boolean),soulDelayCost:entry.itemId===normalCoreNextId?0:Math.min(.08,(entry.cost??0)/50000),flowTransitionPenalty:entry.itemId===normalCoreNextId||flowSet.has(entry.itemId)?0:.025,slotPressurePenalty:0,powerSpikeDelay:entry.itemId!==normalCoreNextId&&shouldPreservePowerSpike(nearSpike,entry.counterUrgency)? .08:0}); return { ...entry, pathSynergy: Math.max(flowSet.has(entry.itemId) ? 0.08 : 0, personalSequencePrior(activePersonalProfile, allOwnedItemIds, entry.itemId)), timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - effectiveGameTimeSeconds) / 900), affordabilityUtility: entry.cost == null || liveSouls == null ? 0 : liveSouls >= entry.cost ? 1 : -Math.min(1, (entry.cost - liveSouls) / 5000), deviationCost: deviation.totalDeviationCost, opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 }; }));
     const nextBuyScores = new Map(nextBuyOrder.map((entry) => [entry.itemId, entry.nextBuyScore]));
     const pathIds = planPurchasePath(pathCandidates, itemFlow, 16);
     const priorityIds = [...new Set([...nextBuyOrder.slice(0, 1).map((entry) => entry.itemId), ...pathIds])].slice(0, 16);
@@ -910,7 +950,7 @@ export default function Home() {
     const corePath = purchaseOrder.filter((entry) => !adaptiveIds.has(entry.item.id)).slice(0, 6);
     const situational = pool.filter((entry) => tagsForItem(entry.item.class_name).length > 0 && !(entry.mechanicFit ?? 0) && !tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected })).slice(0, 4);
     return { early, mid, late, weapon, vitality, spirit, flex, purchaseOrder, corePath, adaptiveCounters, situational, sellSuggestions, values,
-      normalCoreNextId, nextBuyOrder: nextBuyOrder.map((entry) => ({ itemId: entry.itemId, nextBuyScore: entry.nextBuyScore })), nextBuyScores };
+      normalCoreNextId, nextBuyOrder: nextBuyOrder.map((entry) => ({ itemId: entry.itemId, nextBuyScore: entry.nextBuyScore, deviationCost: entry.deviationCost ?? 0 })), nextBuyScores };
   }, [allOwnedItemIds, buildRecommendations, buildStyle, buyTarget, desktopLiveMatch, desktopStatus?.in_game, effectiveGameTimeSeconds, heroId, itemFlow, items, lifestealDetected, ownAccountId, personalHeroProfile, threats]);
 
   useEffect(() => {
@@ -925,9 +965,23 @@ export default function Home() {
   useEffect(() => {
     const match = desktopLiveMatch;
     if (!desktopStatus?.in_game || !match?.match_id || !match.account_id || !match.game_time_s || !heroId || typeof window === "undefined") return;
-    const choices = fullBuildPlan.nextBuyOrder.slice(0, 3).map((entry) => ({ itemId: entry.itemId, score: entry.nextBuyScore }));
-    if (choices.length) recordRecommendationSnapshot(match.account_id, match.match_id, heroId, match.game_time_s, choices, window.localStorage);
-  }, [desktopLiveMatch, desktopStatus?.in_game, fullBuildPlan.nextBuyOrder, heroId]);
+    const ownPlayer = match.players.find(player => player.account_id === match.account_id);
+    const enemyPlayers = match.players.filter(player => player.hero_id != null && ownPlayer?.team != null && player.team != null && player.team !== ownPlayer.team);
+    const enemyThreats = scoreThreats(enemyPlayers.map(player=>({heroId:player.hero_id!,netWorth:player.net_worth,soulsPerMinute:player.souls_per_minute,kills:player.kills,deaths:player.deaths,assists:player.assists,statlockerPP:player.account_id==null?null:playerProfiles[player.account_id]?.ppScore??null})),match.game_time_s)
+      .slice(0,5).map(threat=>({heroId:threat.heroId,weight:threat.weight,playerName:(enemyPlayers.find(player=>player.hero_id===threat.heroId)?.account_id==null?null:playerProfiles[enemyPlayers.find(player=>player.hero_id===threat.heroId)!.account_id!]?.name)??null}));
+    const selected = fullBuildPlan.nextBuyOrder[0];
+    const selectedRecommendation = selected ? buildRecommendations.find(entry=>entry.item.id===selected.itemId) : undefined;
+    const reasonCodes = [
+      ...(selectedRecommendation?.laneFit ? ["lane_matchup"] : []),
+      ...(selectedRecommendation?.coreFit && selectedRecommendation.coreFit > .05 ? ["core_path"] : []),
+      ...(selectedRecommendation?.mechanicFit && selectedRecommendation.mechanicFit > .2 ? ["counter_mechanics"] : []),
+      ...(selectedRecommendation?.coveredEnemyIds && selectedRecommendation.coveredEnemyIds.length > 1 ? ["multi_enemy_coverage"] : []),
+      ...(selected?.deviationCost != null && selected.deviationCost < .035 ? ["low_build_deviation"] : []),
+    ];
+    const laneEnemy = enemyPlayers.find(player=>player.hero_id===laneOpponentId);
+    const choices = selected ? [{ itemId:selected.itemId,score:selected.nextBuyScore,reasonCodes,enemyThreats,phase:match.game_time_s<600?"early" as const:match.game_time_s<1200?"mid" as const:"late" as const,normalCoreItemId:fullBuildPlan.normalCoreNextId,laneState:match.game_time_s<600?laneState(ownPlayer?.net_worth??null,[laneEnemy?.net_worth??null]):"unknown" as const }] : [];
+    if (choices.length) { const ownProfile=playerProfiles[match.account_id]; recordRecommendationSnapshot(match.account_id, match.match_id, heroId, match.game_time_s, choices, window.localStorage,{matchMode:match.match_mode_parsed,rankSnapshot:ownProfile?{estimatedRankNumber:ownProfile.estimatedRankNumber,ppScore:ownProfile.ppScore,playerName:ownProfile.name}:null}); }
+  }, [buildRecommendations, desktopLiveMatch, desktopStatus?.in_game, fullBuildPlan.nextBuyOrder, fullBuildPlan.normalCoreNextId, heroId, laneOpponentId, playerProfiles]);
 
   useEffect(() => {
     const matchId = desktopLastMatch?.match_id;
@@ -936,15 +990,22 @@ export default function Home() {
     const cache = recommendationOutcomeCache(accountId, window.localStorage);
     if (cache.completed[matchId] || !cache.pending[matchId]) return;
     let active = true;
+    const retry = window.setTimeout(() => { if (active) setHistoryRevision(value => value + 1); }, 30_000);
     void fetch("/api/statlocker/matches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify([matchId]) })
       .then((response) => response.ok ? response.json() : null)
       .then((payload: unknown) => {
         if (!active || !payload || typeof payload !== "object" || !Array.isArray((payload as Record<string, unknown>).matches)) return;
         const detail = (payload as { matches: unknown[] }).matches.find((entry) => entry && typeof entry === "object" && ((entry as Record<string, unknown>).matchId ?? (entry as Record<string, unknown>).match_id) === matchId);
-        if (detail) completeRecommendationOutcome(accountId, detail, window.localStorage);
+        if (detail) {
+          const wasComplete = Boolean(recommendationOutcomeCache(accountId, window.localStorage).completed[matchId]);
+          if (completeRecommendationOutcome(accountId, detail, window.localStorage)) {
+            setHistoryRevision(value => value + 1);
+            if (!wasComplete) { setMatchCompleteNotice({ matchId, ready: true }); setUnseenReviewMatchId(matchId); }
+          }
+        }
       }).catch((error) => console.warn("Recommendation outcome sync is deferred; saved recommendations remain local.", error));
-    return () => { active = false; };
-  }, [desktopLastMatch?.match_id, desktopLastMatch?.account_id, desktopStatus?.in_game, savedSteamProfile?.account_id]);
+    return () => { active = false; window.clearTimeout(retry); };
+  }, [desktopLastMatch?.match_id, desktopLastMatch?.account_id, desktopStatus?.in_game, savedSteamProfile?.account_id, historyRevision]);
 
   const counterPicks = useMemo<CounterPick[]>(() => {
     if (!allCounterStats.length || !enemyIds.length) return [];
@@ -1255,13 +1316,20 @@ export default function Home() {
       return [laneKey, rate];
     })) as Record<"yellow" | "blue" | "green", number | null>;
   }, [allyTeamIds, enemyIds, laneAssignments, laneCounterStats]);
+  const localOutcomeCache = typeof window !== "undefined" && ownAccountId ? recommendationOutcomeCache(ownAccountId, window.localStorage) : { pending: {}, completed: {} };
+  const completedOutcomes = Object.values(localOutcomeCache.completed);
+  const heroNameMap = useMemo(() => new Map(heroes.map(hero => [hero.id, hero.name])), [heroes]);
+  const itemNameMap = useMemo(() => new Map(items.map(item => [item.id, item.name])), [items]);
+  const itemCategoryMap = useMemo(() => new Map(items.flatMap(item => item.item_slot_type ? [[item.id, item.item_slot_type] as const] : [])), [items]);
+  const heroImageMap = useMemo(() => new Map(heroes.flatMap(hero => hero.images?.icon_hero_card_webp ? [[hero.id, hero.images.icon_hero_card_webp] as const] : [])), [heroes]);
+  const itemImageMap = useMemo(() => new Map(items.flatMap(item => item.shop_image_webp ? [[item.id, item.shop_image_webp] as const] : [])), [items]);
   return (
     <main className={desktopStatus ? "desktop-shell" : undefined}>
-      {desktopStatus && <aside className="desktop-sidebar"><a className="desktop-brand" href="#top"><span>CL</span><b>COUNTERLOCK</b></a><nav aria-label="Desktop navigation">{(["match", "build", "system"] as const).map((tab) => <button key={tab} type="button" className={desktopTab === tab ? "active" : ""} aria-current={desktopTab === tab ? "page" : undefined} onClick={() => setDesktopTab(tab)}><i>{tab === "match" ? "◉" : tab === "build" ? "◇" : "⚙"}</i>{tab === "match" ? "Current Match" : tab === "build" ? "Build Lab" : "Settings"}</button>)}</nav><div className="desktop-sidebar-status"><b>DEADLOCK</b><span><i />{desktopStatus.game_running ? "Connected" : "Waiting"}</span><small>v0.1.4</small></div></aside>}
+      {desktopStatus && <aside className="desktop-sidebar"><a className="desktop-brand" href="#top"><span>CL</span><b>COUNTERLOCK</b></a><nav aria-label="Desktop navigation">{(["match", "build", "review", "history", "system"] as const).map((tab) => <button key={tab} type="button" className={desktopTab === tab ? "active" : ""} aria-current={desktopTab === tab ? "page" : undefined} onClick={() => { setDesktopTab(tab); if (tab === "review") setUnseenReviewMatchId(null); }}><i>{tab === "match" ? "◉" : tab === "build" ? "◇" : tab === "review" ? "▤" : tab === "history" ? "◷" : "⚙"}</i>{tab === "match" ? "Current Match" : tab === "build" ? "Build Lab" : tab === "review" ? "Match Review" : tab === "history" ? "My Matches" : "Settings"}{tab === "review" && unseenReviewMatchId ? <b className="nav-new">NEW</b> : null}</button>)}</nav><div className="desktop-sidebar-status"><b>DEADLOCK</b><span><i />{desktopStatus.game_running ? "Connected" : "Waiting"}</span><small>v0.1.4</small></div></aside>}
       <div className={desktopStatus ? "desktop-workspace" : undefined}>
       <header className={desktopStatus ? "desktop-topbar" : "site-header"}>
         {!desktopStatus && <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></a>}
-        {desktopStatus && <div className="desktop-context-title"><small>{desktopStatus.in_game ? "LIVE MATCH" : "DEADLOCK COMPANION"}</small><strong>{desktopStatus.in_game && desktopLiveMatch?.game_time_s != null ? `${Math.floor(desktopLiveMatch.game_time_s / 60)}:${String(desktopLiveMatch.game_time_s % 60).padStart(2, "0")}` : desktopStatus.game_running ? "Waiting for match" : "Ready"}</strong></div>}
+        {desktopStatus && <div className={`desktop-context-title ${desktopTab === "review" || desktopTab === "history" ? "report-context" : ""}`}><small>{desktopTab === "review" ? "MATCH REVIEW" : desktopTab === "history" ? "PERSONAL HISTORY" : desktopStatus.in_game ? "LIVE MATCH" : "DEADLOCK COMPANION"}</small><strong>{desktopTab === "review" ? "Completed match report" : desktopTab === "history" ? "My matches" : desktopStatus.in_game && desktopLiveMatch?.game_time_s != null ? `${Math.floor(desktopLiveMatch.game_time_s / 60)}:${String(desktopLiveMatch.game_time_s % 60).padStart(2, "0")}` : desktopStatus.game_running ? "Waiting for match" : "Ready"}</strong></div>}
         <div className="header-actions">
           {!desktopStatus && <div className={`live-pill companion-${companionStatus}`}><span /> {companionStatus === "connected" ? t.companionConnected : companionStatus === "waiting" ? t.companionSearching : t.companionUnavailable}</div>}
           {!desktopStatus && <button className="header-button patch-button" type="button" onClick={() => void showLatestPatch()}>{t.latestPatch}</button>}
@@ -1272,10 +1340,12 @@ export default function Home() {
           </div>
         </div>
       </header>
+      {desktopStatus && matchCompleteNotice && <aside className="match-complete-toast" role="status" aria-live="polite"><span className="toast-mark">✓</span><div><strong>MATCH COMPLETE</strong><small>{matchCompleteNotice.ready ? "Analysis available" : "Analysis pending"}</small></div><button type="button" onClick={() => { setDesktopTab("review"); setUnseenReviewMatchId(null); setMatchCompleteNotice(null); }}>{matchCompleteNotice.ready ? "VIEW REVIEW" : "VIEW STATUS"}</button><button className="toast-dismiss" type="button" aria-label="Dismiss match complete notice" onClick={() => setMatchCompleteNotice(null)}>×</button></aside>}
       {patchOpen && !desktopStatus && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
 
-      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} profiles={playerProfiles} advice={desktopAdvice} recommendations={buildRecommendations} onOpenBuild={() => setDesktopTab("build")} />}
+      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} profiles={playerProfiles} advice={desktopAdvice} recommendations={buildRecommendations} laneOpponentId={laneOpponentId} laneName={lane === "all" ? "unknown" : lane} onOpenBuild={() => setDesktopTab("build")} />}
       {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} profiles={playerProfiles} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={liveAdviceForMatch} recommendations={buildRecommendations} />}
+      {desktopStatus && (desktopTab === "review" || desktopTab === "history") && <MatchHistory key={desktopTab} outcomes={completedOutcomes} pendingMatches={Object.entries(localOutcomeCache.pending).map(([matchId, value]) => ({ matchId: Number(matchId), ...value }))} heroNames={heroNameMap} itemNames={itemNameMap} itemCategories={itemCategoryMap} heroImages={heroImageMap} itemImages={itemImageMap} initialReview={desktopTab === "review"} />}
       {desktopStatus && desktopTab === "system" && <section className="desktop-system-page" aria-label="System diagnostics"><div className="desktop-system-heading"><small>COUNTERLOCK / SYSTEM</small><h1>System & diagnostics</h1><p>Runtime details and local desktop preferences.</p></div><div className="desktop-system-grid">
         <article><h2>Game connection</h2><dl><div><dt>Deadlock</dt><dd>{desktopStatus.game_running ? "Running" : "Not running"}</dd></div><div><dt>Process ID</dt><dd>{desktopStatus.pid ?? "—"}</dd></div><div><dt>Steam build</dt><dd>{desktopStatus.build_id ?? "Unknown"}</dd></div><div><dt>Live source</dt><dd>{desktopStatus.provider}</dd></div><div><dt>Console phase</dt><dd>{desktopStatus.console_phase ?? "No verified event"}</dd></div><div><dt>Match ID</dt><dd>{desktopStatus.match_id ?? "Unavailable"}</dd></div><div><dt>Inventory</dt><dd>{desktopStatus.capabilities.items ? "Available" : "Not available"}</dd></div><div><dt>Install path</dt><dd>{desktopStatus.installation_path ?? "Not detected"}</dd></div></dl>{desktopStatus.last_error && <p className="desktop-system-error">{desktopStatus.last_error}</p>}{desktopLastMatch && <p className="desktop-system-note">Last match: {desktopLastMatch.match_id ?? "ID unknown"} · {desktopLastMatch.source}</p>}</article>
         <article><h2>Desktop settings</h2><label><input type="checkbox" checked={desktopPreferences?.close_to_tray ?? true} onChange={(event) => void updateDesktopPreferences({ close_to_tray: event.target.checked })} />{lang === "de" ? "Beim Schließen im Tray weiterlaufen" : "Keep running in tray when closing"}</label><label><input type="checkbox" checked={desktopPreferences?.compact_always_on_top ?? true} onChange={(event) => void updateDesktopPreferences({ compact_always_on_top: event.target.checked })} />{lang === "de" ? "Kompaktfenster immer im Vordergrund" : "Keep compact window always on top"}</label><p>Game memory is read locally. Screenshots and unspent shop balance are separate capabilities.</p><hr /><h2>{lang === "de" ? "Software-Updates" : "Software updates"}</h2><button type="button" disabled={updateBusy} onClick={() => void checkDesktopUpdates()}>{updateBusy ? (lang === "de" ? "BITTE WARTEN …" : "PLEASE WAIT…") : (lang === "de" ? "NACH UPDATES SUCHEN" : "CHECK FOR UPDATES")}</button>{updateStatus && <p role="status">{updateStatus}</p>}</article>

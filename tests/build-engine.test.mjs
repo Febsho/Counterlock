@@ -193,16 +193,42 @@ test("recommendation outcome logging joins actual purchases once and is idempote
   const data = new Map();
   const storage = { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
   recordRecommendationSnapshot(123, 9001, 10, 601, [{ itemId: 1, score: .7 }, { itemId: 2, score: .6 }], storage);
-  recordRecommendationSnapshot(123, 9001, 10, 630, [{ itemId: 1, score: .8 }, { itemId: 3, score: .55 }], storage);
+  recordRecommendationSnapshot(123, 9001, 10, 630, [{ itemId: 3, score: .55 }, { itemId: 1, score: .8 }], storage);
   const match = { matchId: 9001, players: [{ account_id: 123, hero_id: 10, playerWon: true, items: [{ item_id: 2, game_time_s: 500 }], metrics: { soulsPerMinute: 920, kdaRatio: 3.1, damagePerMinute: 1100, killParticipation: .68 }, mvpScore: .75 }] };
   const first = completeRecommendationOutcome(123, match, storage);
   const again = completeRecommendationOutcome(123, match, storage);
   assert.deepEqual(again, first);
   assert.equal(first.result, "win");
   assert.deepEqual(first.actualPurchases, [{ itemId: 2, gameTime: 500 }]);
-  assert.equal(first.recommendations.length, 3);
+  assert.equal(first.recommendations.length, 2);
   assert.equal(recommendationOutcomeCache(123, storage).pending[9001], undefined);
   assert.equal(recommendationOutcomeCache(123, storage).completed[9001].performance.spm, 920);
+});
+
+test("recommendation history ignores repeated renders but records item and threat-priority changes", () => {
+  const data = new Map(), storage = { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
+  const snapshot = (weight, itemId = 7) => recordRecommendationSnapshot(33, 991, 13, 600, [{ itemId, score: .8, phase: "mid", reasonCodes: ["counter_mechanics"], enemyThreats: [{ heroId: 11, weight, playerName: "Dynamo" }] }], storage,{matchMode:"Ranked",rankSnapshot:{estimatedRankNumber:72,ppScore:4100,playerName:"Febsho"}});
+  snapshot(.40);
+  snapshot(.42);
+  snapshot(.80);
+  snapshot(.80, 9);
+  const pending=recommendationOutcomeCache(33, storage).pending[991];
+  assert.deepEqual(pending.recommendations.map(row=>row.recommendedItemId), [7,7,9]);
+  assert.equal(pending.matchMode,"Ranked");
+  assert.equal(pending.rankSnapshot?.playerName,"Febsho");
+});
+
+test("late final match details enrich an existing local review without losing recommendations", () => {
+  const data = new Map(), storage = { getItem: (key) => data.get(key) ?? null, setItem: (key, value) => data.set(key, value) };
+  recordRecommendationSnapshot(321, 9002, 13, 780, [{ itemId: 41, score: .8 }], storage);
+  const sparse = { matchId: 9002, duration_s: 1900, players: [{ account_id: 321, hero_id: 13, playerWon: true, items: [], metrics: {} }] };
+  const pending = completeRecommendationOutcome(321, sparse, storage);
+  assert.equal(pending.recommendations.length, 1);
+  const enriched = completeRecommendationOutcome(321, { ...sparse, players: [{ account_id: 321, hero_id: 13, playerWon: true, kills: 8, deaths: 2, assists: 10, net_worth: 32000, items: [{ item_id: 41, game_time_s: 900 }], metrics: { soulsPerMinute: 1100 } }] }, storage);
+  assert.equal(enriched.recommendations.length, 1);
+  assert.deepEqual(enriched.actualPurchases, [{ itemId: 41, gameTime: 900 }]);
+  assert.equal(enriched.performance.kills, 8);
+  assert.equal(enriched.netWorth, 32000);
 });
 
 test("Statlocker batch match proxy keeps API key server-side and maps rate limits", async () => {

@@ -3,6 +3,8 @@ import type { DesktopAdvice, DesktopMatch, DesktopPlayer, DesktopStatus } from "
 import type { StatlockerProfile } from "./lib/data/statlocker";
 import { playerRank } from "./lib/player-rank";
 import { scoreThreats } from "./lib/build-engine/threat-score";
+import { enemyTeamProfile } from "./lib/match-intelligence/team-profile";
+import { inferLaneIntent, laneState } from "./lib/match-intelligence/lane";
 
 type LiveHero = { id: number; name: string; images?: { icon_image_small_webp?: string } };
 
@@ -22,22 +24,31 @@ function playerRow(player: DesktopPlayer, heroes: Map<number, LiveHero>, profile
   </summary><div className="desktop-player-profile"><div><small>PROFILE</small><strong>{profile?.name || "Player"}</strong><span>{rank ? `Estimated rank · Statlocker · ${rank.label}` : "Rank unavailable"}</span></div><div><small>LIVE MATCH</small><strong>{player.kills ?? "—"} / {player.deaths ?? "—"} / {player.assists ?? "—"} KDA</strong><span>{player.net_worth?.toLocaleString() ?? "—"} net worth · {player.unspent_souls?.toLocaleString() ?? "—"} souls · {player.souls_per_minute?.toLocaleString() ?? "—"} SPM</span></div>{profile && <div><small>PLAYER DATA</small><strong>{profile.ppScore == null ? "PP —" : `PP ${profile.ppScore}`}</strong><span>{profile.region || "Region unavailable"}</span></div>}{threat && <p>{threat.rank === 1 ? "Primary threat" : `${threatLabel} threat`} · relative live net worth and K/D/A · threat weight ${(threat.weight * 100).toFixed(0)}%</p>}</div></details>;
 }
 
-export function DesktopLivePanel({ status, match, heroes, profiles, advice, recommendations = [], onOpenBuild }: {
+export function DesktopLivePanel({ status, match, heroes, profiles, advice, recommendations = [], laneOpponentId, laneName, onOpenBuild }: {
   status: DesktopStatus;
   match: DesktopMatch | null;
   heroes: Map<number, LiveHero>;
   profiles: Record<number, StatlockerProfile>;
   advice: DesktopAdvice | null;
-  recommendations?: Array<{ item: { id: number }; threatTargets?: number[] }>;
+  recommendations?: Array<{ item: { id: number }; threatTargets?: number[]; coveredEnemyIds?: number[] }>;
+  laneOpponentId?: number;
+  laneName?: string;
   onOpenBuild: () => void;
 }) {
   const own = match?.players.find((player) => player.account_id != null && player.account_id === match.account_id);
+  const laneEnemy = laneOpponentId == null ? undefined : match?.players.find(player => player.hero_id===laneOpponentId);
+  const lanePosition = laneState(own?.net_worth??null,[laneEnemy?.net_worth??null]);
+  const laneIntent = inferLaneIntent(lanePosition,own?.deaths??0);
   const allies = match?.players.filter((player) => own?.team != null && player.team === own.team) ?? [];
   const enemies = match?.players.filter((player) => own?.team != null && player.team != null && player.team !== own.team) ?? [];
   const threatScores = scoreThreats(enemies.flatMap((player) => player.hero_id == null ? [] : [{ heroId: player.hero_id, netWorth: player.net_worth, soulsPerMinute: player.souls_per_minute, kills: player.kills, deaths: player.deaths, assists: player.assists, statlockerPP: player.account_id == null ? null : profiles[player.account_id]?.ppScore }]), match?.game_time_s ?? null);
   const targetHeroId = advice?.recommended ? recommendations.find((entry) => entry.item.id === advice.recommended?.item_id)?.threatTargets?.[0] : undefined;
   const target = targetHeroId == null ? undefined : enemies.find((player) => player.hero_id === targetHeroId);
   const targetProfile = target?.account_id == null ? undefined : profiles[target.account_id];
+  const coveredIds = advice?.recommended ? recommendations.find(entry=>entry.item.id===advice.recommended?.item_id)?.coveredEnemyIds??[] : [];
+  const coveredNames = coveredIds.map(id=>heroes.get(id)?.name??`Hero #${id}`);
+  const teamProfile = enemyTeamProfile(enemies.flatMap(player => player.hero_id == null ? [] : [{heroId:player.hero_id,netWorth:player.net_worth,soulsPerMinute:player.souls_per_minute,kills:player.kills,deaths:player.deaths,assists:player.assists,statlockerPP:player.account_id==null?null:profiles[player.account_id]?.ppScore}]));
+  const pressureRows = [{label:"Weapon",value:teamProfile.weaponDamage},{label:"Spirit",value:teamProfile.spiritDamage},{label:"Burst",value:Math.max(teamProfile.weaponBurst,teamProfile.spiritBurst)},{label:"CC",value:Math.max(teamProfile.hardCc,teamProfile.softCc)},{label:"Sustain",value:Math.max(teamProfile.healing,teamProfile.sustain)},{label:"Mobility",value:teamProfile.mobility}];
   const live = status.in_game && !!match;
   return <section className="desktop-live-page" aria-label="Current match">
     <div className="desktop-live-heading"><div><small>COUNTERLOCK / CURRENT MATCH</small><h1>{live ? "Live match" : status.game_running ? "Deadlock is running" : "Ready for match"}</h1><p>{live ? "Player values read from your running Deadlock client." : status.game_running ? "Waiting for a local match and verified game memory." : "Launch Deadlock to start local match detection."}</p></div><span className={`desktop-live-indicator${live ? " active" : ""}`}>{live ? "● LIVE MEMORY" : "○ WAITING"}</span></div>
@@ -49,6 +60,8 @@ export function DesktopLivePanel({ status, match, heroes, profiles, advice, reco
       </article>
       <aside className="desktop-threat-panel"><header><small>CURRENT THREATS</small><span>{threatScores.length ? `${threatScores.length} ENEMIES` : "AWAITING ROSTER"}</span></header>{threatScores.length ? threatScores.slice(0, 3).map((threat, index) => { const player = enemies.find((entry) => entry.hero_id === threat.heroId)!; const profile = player.account_id == null ? undefined : profiles[player.account_id]; const hero = heroes.get(threat.heroId); return <div className="desktop-threat-feature" key={`${threat.heroId}-${index}`}><b>0{index + 1}</b><span className="desktop-threat-avatar">{profile?.avatarUrl ? <img src={profile.avatarUrl} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : hero?.images?.icon_image_small_webp && <img src={hero.images.icon_image_small_webp} alt="" />}</span><div><strong>{profile?.name || "Player"}</strong><small>{hero?.name ?? `Hero #${threat.heroId}`} · {playerRank(profile?.estimatedRankNumber)?.label ?? "Rank —"}</small></div><em>{index === 0 ? "PRIMARY" : index === 1 ? "HIGH" : "HIGH"}<small>{(threat.weight * 100).toFixed(0)}% weight</small></em></div>}) : <p>Threat scores appear when enemy live stats are available.</p>}</aside>
     </div>
-    <article className="desktop-live-advice"><div className="desktop-next-buy-icon">↗</div><div className="desktop-next-buy-copy"><small>NEXT BUY</small><h2>{advice?.recommended?.name ?? "Awaiting verified recommendation"}</h2>{advice?.recommended ? <><p>{advice.recommended.reason}</p><span>{target ? `VS ${targetProfile?.name || "Player"} · ${heroes.get(targetHeroId!)?.name ?? "Hero"}` : "VS ENEMY TEAM"} · ◈ {advice.recommended.cost.toLocaleString()}</span></> : <p>Current hero and enemy roster are needed for an item recommendation.</p>}</div><strong>{advice?.recommended?.affordable == null ? "SOULS UNKNOWN" : advice.recommended.affordable ? "BUY NOW" : "SAVE SOULS"}</strong><button type="button" onClick={onOpenBuild}>BUILD LAB →</button></article>
+    <section className="team-pressure"><header><small>ENEMY TEAM PROFILE</small><span>THREAT PROFILE</span></header>{pressureRows.map(row=><div key={row.label}><span>{row.label}</span><i><b style={{width:`${Math.round(row.value*100)}%`}} /></i><strong>{row.value>=.75?"HIGH":row.value>=.45?"MEDIUM":"LOW"}</strong></div>)}{teamProfile.confidence<.25&&<small className="profile-evidence">Limited hero-mechanics evidence</small>}</section>
+    {live && (match?.game_time_s??0)<600 && laneEnemy?.hero_id!=null && <article className="lane-plan-card"><small>LANE PLAN · {laneName&&laneName!=="unknown"?`${laneName.toUpperCase()} LANE`:"LANE UNKNOWN"}</small><strong>vs {profiles[laneEnemy.account_id??-1]?.name??"Opponent"} · {heroes.get(laneEnemy.hero_id)?.name??`Hero #${laneEnemy.hero_id}`}</strong><span>STATE: {lanePosition==="unknown"?"UNKNOWN":lanePosition.toUpperCase()} · GOAL: {laneIntent}{laneIntent==="SURVIVE"?" + FARM":""}</span><p>Early recommendations use same-lane evidence where available and taper off after 10 minutes.</p></article>}
+    <article className="desktop-live-advice"><div className="desktop-next-buy-icon">↗</div><div className="desktop-next-buy-copy"><small>NEXT BUY</small><h2>{advice?.recommended?.name ?? "Awaiting verified recommendation"}</h2>{advice?.recommended ? <><p>{advice.recommended.reason}</p><span>{target ? `VS ${targetProfile?.name || "Player"} · ${heroes.get(targetHeroId!)?.name ?? "Hero"}` : "VS ENEMY TEAM"} · ◈ {advice.recommended.cost.toLocaleString()}</span>{coveredNames.length>0&&<span className="next-buy-coverage"><b>COVERS</b> {coveredNames.join(" · ")}</span>}</> : <p>Current hero and enemy roster are needed for an item recommendation.</p>}</div><strong>{advice?.recommended?.affordable == null ? "SOULS UNKNOWN" : advice.recommended.affordable ? "BUY NOW" : "SAVE SOULS"}</strong><button type="button" onClick={onOpenBuild}>BUILD LAB →</button></article>
   </section>;
 }

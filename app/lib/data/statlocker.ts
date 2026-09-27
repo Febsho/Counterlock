@@ -91,6 +91,19 @@ export async function syncPersonalHeroProfile(accountId: number, heroId: number,
     const cacheKey = personalCacheKey(accountId, heroId);
     let cached: PersonalMatch[] = [];
     try { const raw = localStorage.getItem(cacheKey); const parsed: unknown = raw ? JSON.parse(raw) : []; if (Array.isArray(parsed)) cached = parsed.filter((row): row is PersonalMatch => Boolean(row && Number.isInteger(row.matchId) && Number.isInteger(row.heroId))); } catch { cached = []; }
+    // Completed local recommendation reviews are first-party history too. Keep them
+    // available to personal learning even when optional remote history is offline.
+    try {
+      const raw = localStorage.getItem(`counterlock:recommendation-outcomes:v1:${accountId}`);
+      const parsed = raw ? JSON.parse(raw) as { completed?: Record<string, Record<string, unknown>> } : null;
+      for (const value of Object.values(parsed?.completed ?? {})) {
+        const matchId = value.matchId, matchHero = value.heroId;
+        if (!Number.isSafeInteger(matchId) || matchHero !== heroId || !Array.isArray(value.actualPurchases)) continue;
+        const performance = value.performance && typeof value.performance === "object" ? value.performance as Record<string, unknown> : {};
+        const items = value.actualPurchases.flatMap(entry => { if (!entry || typeof entry !== "object") return []; const row=entry as Record<string,unknown>; return Number.isInteger(row.itemId)&&Number.isFinite(row.gameTime)?[{itemId:row.itemId as number,gameTimeSeconds:row.gameTime as number}]:[]; });
+        cached.push({matchId:matchId as number,heroId,won:value.result==="win",gameDurationSeconds:finite(value.durationSeconds)??0,items,kda:finite(performance.kda),spm:finite(performance.spm),damagePerMinute:finite(performance.damagePerMinute),killParticipation:finite(performance.killParticipation),mvpScore:finite(performance.mvpScore)});
+      }
+    } catch { /* malformed local review data does not block profile refresh */ }
     const historyResponse = await fetch(`${DEADLOCK_API}/players/${accountId}/match-history`);
     if (!historyResponse.ok) return buildPersonalHeroProfile(accountId, heroId, cached, profile);
     const history: unknown = await historyResponse.json();

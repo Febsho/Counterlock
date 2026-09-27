@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5
+
+- Added match history with completed match summaries and player performance context.
+- Added match intelligence for lane state, enemy team profiles, and early item decisions.
+- Expanded counter recommendations with enemy coverage and clearer live build context.
+- Added regression coverage for match history and match intelligence.
+
 ## 0.1.4
 
 - Redesigned the Tauri desktop shell with compact navigation and a contextual
