@@ -47,8 +47,12 @@ export async function fetchStatlockerProfiles(accountIds: number[]) {
     }) : [];
     const status = allowed.includes(data.status as StatlockerStatus) ? data.status! : "unavailable" as const;
     const fetched = new Map(profiles.map((profile) => [profile.accountId, profile]));
-    const until = Date.now() + 15 * 60_000;
-    missing.forEach((id) => profileCache.set(id, { profile: fetched.get(id) ?? null, until, status }));
+    missing.forEach((id) => {
+      const profile = fetched.get(id) ?? null;
+      // Missing names should be retried while a live roster is still present.
+      const ttl = profile?.name ? 15 * 60_000 : 60_000;
+      profileCache.set(id, { profile, until: Date.now() + ttl, status });
+    });
     return { status, profiles };
   } catch (error) {
     console.warn("Optional Statlocker profile source is unavailable; recommendations use live and Deadlock API evidence.", error);

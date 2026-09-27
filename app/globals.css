@@ -855,6 +855,10 @@ footer a { color: inherit; }
 .desktop-player-profile strong { color:#dce8dd;font-size:11px; }
 .desktop-player-profile span,.desktop-player-profile p { color:#91a094;font-size:10px; }
 .desktop-player-profile p { margin:0;align-self:center; }
+.desktop-player-inventory { min-width:180px; }
+.desktop-player-inventory > span { display:flex;flex-wrap:wrap;gap:5px;align-items:center;min-height:27px; }
+.desktop-live-item { display:inline-flex;align-items:center;justify-content:center;min-width:25px;height:25px;padding:2px;border:1px solid #35443a;border-radius:3px;color:#a8b7aa;font-size:8px; }
+.desktop-live-item img { width:22px;height:22px;object-fit:contain; }
 .desktop-player-row.is-you { border-left: 3px solid #58d694; background: #253229; }
 .desktop-player-portrait { display: grid; place-items: center; width: 40px; height: 40px; overflow: hidden; border-radius: 5px; background: #343a33; font-weight: 900; }
 .desktop-player-portrait img { width: 100%; height: 100%; object-fit: cover; }
@@ -871,6 +875,9 @@ footer a { color: inherit; }
 .desktop-player-name, .desktop-player-stat { min-width: 0; }
 .desktop-player-name strong { display: block; overflow: hidden; color: #f2f5ef; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-player-name small { display: block; margin-top: 3px; color: #86a28d; font: 800 9px/1 monospace; }
+.desktop-player-items { display:flex;gap:3px;margin-top:4px;overflow:hidden; }
+.desktop-player-items > span { display:inline-flex;width:19px;height:19px;flex:0 0 19px;align-items:center;justify-content:center;border:1px solid #35443a;border-radius:2px;background:#171d19; }
+.desktop-player-items img { width:17px;height:17px;object-fit:contain; }
 .desktop-player-stat b { display: block; margin-top: 5px; color: #e3ebe1; font-size: 14px; white-space: nowrap; }
 .desktop-live-overview { display: flex; align-items: center; gap: 0; margin: 0 0 14px; padding: 10px 14px; border: 1px solid #303a33; background: #191f1b; }
 .desktop-live-overview > div { display: grid; gap: 4px; min-width: 120px; padding: 0 16px; border-right: 1px solid #303a33; }

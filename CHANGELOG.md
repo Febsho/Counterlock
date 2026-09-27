@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.7
+
+- Improved next-buy ranking with confidence-weighted item performance for the
+  current game phase and observed purchase chains from items already owned.
+- Added current player item icons to the live roster and unique account-ID
+  fallbacks when profile names are unavailable; profile lookups retry each minute.
+- Labeled the active match data source and clarified the refresh cadence of local
+  memory data versus public API snapshots.
+
 ## 0.1.6
 
 - Reorganized the live Build Lab around the next purchase, then current inventory,

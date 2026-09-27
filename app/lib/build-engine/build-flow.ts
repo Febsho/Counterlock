@@ -33,6 +33,21 @@ export function flowCoreFit(flow: ItemFlowStats | null, itemId: number, phase: n
   return node ? { rate: node.adjusted_win_rate, matches: node.matches, phase: node.column } : null;
 }
 
+/** Confidence-shrunk phase and purchase-chain evidence for the next-buy rank. */
+export function flowItemEvidence(flow: ItemFlowStats | null, itemId: number, phase: number, ownedItemIds: number[]) {
+  if (!flow) return 0;
+  const node = flow.nodes.find((candidate) => candidate.item_id === itemId && candidate.column === phase);
+  if (!node || node.matches < 20) return 0;
+  const cohort = Math.max(1, flow.reached_per_column[phase] ?? flow.baseline.matches);
+  const support = Math.min(1, node.matches / Math.max(1, cohort));
+  const peerNodes = flow.nodes.filter((candidate) => candidate.column === phase && candidate.item_id !== itemId && candidate.matches >= 20);
+  const peerRate = peerNodes.length ? peerNodes.reduce((sum, candidate) => sum + candidate.adjusted_win_rate, 0) / peerNodes.length : 0.5;
+  const phaseLift = Math.max(-0.08, Math.min(0.08, node.adjusted_win_rate - peerRate));
+  const incoming = flow.edges.filter((edge) => edge.to_item_id === itemId && edge.from_column === phase - 1 && ownedItemIds.includes(edge.from_item_id) && edge.matches >= 20);
+  const bestTransition = incoming.reduce((best, edge) => Math.max(best, Math.max(-0.08, Math.min(0.08, edge.wins / edge.matches - 0.5)) * Math.min(1, edge.matches / 100)), 0);
+  return Math.max(-0.08, Math.min(0.08, (phaseLift * support + bestTransition) * Math.min(1, node.matches / 100)));
+}
+
 export function itemFlowPhase(gameTimeSeconds: number | null): number {
   if (gameTimeSeconds == null || !Number.isFinite(gameTimeSeconds) || gameTimeSeconds < 9 * 60) return 0;
   if (gameTimeSeconds < 20 * 60) return 1;
