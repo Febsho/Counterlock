@@ -154,8 +154,16 @@ impl MatchDataProvider for AttachedProvider {
                             .players
                             .iter()
                             .any(|player| player.net_worth.is_some()),
-                        unspent_souls: snapshot.players.iter().any(|player| player.unspent_souls.is_some()),
-                        items: snapshot.players.iter().find(|player| player.account_id == snapshot.account_id).and_then(|player| player.owned_item_class_tokens.as_ref()).is_some(),
+                        unspent_souls: snapshot
+                            .players
+                            .iter()
+                            .any(|player| player.unspent_souls.is_some()),
+                        items: snapshot
+                            .players
+                            .iter()
+                            .find(|player| player.account_id == snapshot.account_id)
+                            .and_then(|player| player.owned_item_class_tokens.as_ref())
+                            .is_some(),
                         kills_deaths_assists: snapshot
                             .players
                             .iter()

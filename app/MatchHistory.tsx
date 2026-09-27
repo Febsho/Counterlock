@@ -8,16 +8,17 @@ import { orderedMatches } from "./lib/match-history";
 
 type PendingMatch = PendingMatchRecord & { matchId: number };
 export type SteamHistoryProfile = { account_id: number; personaname: string; profileurl: string; avatar: string };
-type Props = { outcomes: RecommendationOutcome[]; pendingMatches?: PendingMatch[]; accountId?: number | null; playerName?: string | null; onLinkSteamProfile?: (profile: SteamHistoryProfile) => void; onForgetSteamProfile?: () => void; heroNames: Map<number, string>; itemNames: Map<number, string>; itemCategories?: Map<number, string>; heroImages?: Map<number, string>; itemImages?: Map<number, string>; initialReview?: boolean };
+type Props = { outcomes: RecommendationOutcome[]; pendingMatches?: PendingMatch[]; accountId?: number | null; playerName?: string | null; onLinkSteamProfile?: (profile: SteamHistoryProfile) => void; onForgetSteamProfile?: () => void; onOpenHero?: (heroId: number) => void; heroNames: Map<number, string>; itemNames: Map<number, string>; itemCategories?: Map<number, string>; heroImages?: Map<number, string>; itemImages?: Map<number, string>; initialReview?: boolean };
 
-export function MatchHistory({ outcomes, pendingMatches = [], accountId, playerName, onLinkSteamProfile, onForgetSteamProfile, heroNames, itemNames, itemCategories, heroImages, itemImages, initialReview = false }: Props) {
-  const [apiMatches, setApiMatches] = useState<RecommendationOutcome[]>([]);
-  const [statlockerMatches, setStatlockerMatches] = useState<RecommendationOutcome[]>([]);
-  const [historyStatus, setHistoryStatus] = useState<"loading" | "connected" | "local" | "unavailable" | "not_configured">("loading");
+export function MatchHistory({ outcomes, pendingMatches = [], accountId, playerName, onLinkSteamProfile, onForgetSteamProfile, onOpenHero, heroNames, itemNames, itemCategories, heroImages, itemImages, initialReview = false }: Props) {
+  const [apiMatchState, setApiMatchState] = useState<{ accountId: number | null; rows: RecommendationOutcome[] }>({ accountId: null, rows: [] });
+  const [statlockerMatchState, setStatlockerMatchState] = useState<{ accountId: number | null; rows: RecommendationOutcome[] }>({ accountId: null, rows: [] });
+  const apiMatches = apiMatchState.accountId === accountId ? apiMatchState.rows : [];
+  const statlockerMatches = statlockerMatchState.accountId === accountId ? statlockerMatchState.rows : [];
+  const [historyStatus, setHistoryStatus] = useState<"loading" | "connected" | "local" | "unavailable">(() => accountId ? "loading" : "local");
   const localMatchIdKey = outcomes.map((match) => match.matchId).sort((a, b) => a - b).join(",");
   useEffect(() => {
-    if (!accountId || typeof window === "undefined") { setHistoryStatus("not_configured"); return; }
-    setApiMatches([]); setStatlockerMatches([]);
+    if (!accountId || typeof window === "undefined") return;
     let active = true;
     const load = async () => {
       setHistoryStatus("loading");
@@ -40,7 +41,7 @@ export function MatchHistory({ outcomes, pendingMatches = [], accountId, playerN
             rankSnapshot: { estimatedRankNumber: Number.isInteger(badge) && (badge as number) >= 11 && (badge as number) <= 116 ? badge as number : null, ppScore: null, playerName: playerName ?? null },
             performance: { kills: finite(row.player_kills), deaths: finite(row.player_deaths), assists: finite(row.player_assists), spm: null, kda: null, damagePerMinute: null, killParticipation: null, mvpScore: null } } satisfies RecommendationOutcome];
         }).slice(0, 100);
-        if (active) setApiMatches(rows);
+        if (active) setApiMatchState({ accountId, rows });
         const ids = rows.map((row) => row.matchId);
         if (!ids.length) { if (active) setHistoryStatus("connected"); return; }
         const fetched: RecommendationOutcome[] = [];
@@ -52,7 +53,7 @@ export function MatchHistory({ outcomes, pendingMatches = [], accountId, playerN
           if (payload.status !== "connected" || !Array.isArray(payload.matches)) continue;
           for (const value of payload.matches) { const parsed = statlockerOutcome(value, accountId); if (parsed) fetched.push(parsed); }
         }
-        if (active) { setStatlockerMatches(fetched); setHistoryStatus("connected"); }
+        if (active) { setStatlockerMatchState({ accountId, rows: fetched }); setHistoryStatus("connected"); }
       } catch { if (active) setHistoryStatus("unavailable"); }
     };
     void load(); return () => { active = false; };
@@ -74,12 +75,12 @@ export function MatchHistory({ outcomes, pendingMatches = [], accountId, playerN
     }
     return orderedMatches([...byId.values()]);
   }, [apiMatches, outcomes, statlockerMatches]);
-  const [selectedId, setSelectedId] = useState<number | null>(() => initialReview ? sorted[0]?.matchId ?? null : null);
-  useEffect(() => { if (initialReview && selectedId == null && sorted.length) setSelectedId(sorted[0].matchId); }, [initialReview, selectedId, sorted]);
-  const selected = sorted.find((match) => match.matchId === selectedId) ?? null;
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const resolvedSelectedId = selectedId === -1 ? null : selectedId ?? (initialReview ? sorted[0]?.matchId ?? null : null);
+  const selected = sorted.find((match) => match.matchId === resolvedSelectedId) ?? null;
   return <section className="match-history-page" aria-label={selected ? "Match review" : "My matches"}>
-    {selected ? <MatchReview match={selected} heroNames={heroNames} itemNames={itemNames} itemCategories={itemCategories} heroImages={heroImages} itemImages={itemImages} onBack={() => setSelectedId(null)} /> :
-      <MatchLibrary outcomes={sorted} pendingMatches={pendingMatches} heroNames={heroNames} itemNames={itemNames} heroImages={heroImages} itemImages={itemImages} historyStatus={historyStatus} accountId={accountId} playerName={playerName} onLinkSteamProfile={onLinkSteamProfile} onForgetSteamProfile={onForgetSteamProfile} onSelect={(id) => setSelectedId(id)} />}
+    {selected ? <MatchReview match={selected} heroNames={heroNames} itemNames={itemNames} itemCategories={itemCategories} heroImages={heroImages} itemImages={itemImages} onBack={() => setSelectedId(-1)} onOpenHero={onOpenHero} /> :
+      <MatchLibrary outcomes={sorted} pendingMatches={pendingMatches} heroNames={heroNames} itemNames={itemNames} heroImages={heroImages} itemImages={itemImages} historyStatus={accountId ? historyStatus : "local"} accountId={accountId} playerName={playerName} onLinkSteamProfile={onLinkSteamProfile} onForgetSteamProfile={onForgetSteamProfile} onSelect={(id) => setSelectedId(id)} />}
   </section>;
 }
 

@@ -127,10 +127,14 @@ pub fn collect_players(
             if pawn_index != 0 && pawn_index < 0x7fff {
                 if let Some(pawn) = list.entity(pawn_index) {
                     player.unspent_souls = mem
-                        .read_u32(pawn + currency_offset + u64::from(pawn_offsets.gold_currency_index) * 4)
+                        .read_u32(
+                            pawn + currency_offset
+                                + u64::from(pawn_offsets.gold_currency_index) * 4,
+                        )
                         .ok()
                         .filter(|value| *value <= 1_000_000);
-                    player.owned_item_class_tokens = read_owned_item_tokens(mem, list, pawn, pawn_offsets);
+                    player.owned_item_class_tokens =
+                        read_owned_item_tokens(mem, list, pawn, pawn_offsets);
                 }
             }
         }
@@ -156,21 +160,32 @@ fn read_owned_item_tokens(
     let component = pawn.checked_add(offsets.ability_component?)?;
     let vector = component.checked_add(offsets.abilities_vector?)?;
     let count = mem.read_u32(vector).ok()?;
-    if count > 64 { return None; }
-    let data = mem.read_ptr(vector.checked_add(offsets.abilities_data?)?).ok().flatten()?;
+    if count > 64 {
+        return None;
+    }
+    let data = mem
+        .read_ptr(vector.checked_add(offsets.abilities_data?)?)
+        .ok()
+        .flatten()?;
     let slot_offset = offsets.ability_slot?;
     let token_offset = offsets.ability_subclass_id?;
     let mut tokens = Vec::new();
     for position in 0..count {
         let handle = mem.read_u32(data + u64::from(position) * 4).ok()?;
         let index = handle & 0x7fff;
-        if index == 0 || index >= 0x7fff { return None; }
+        if index == 0 || index >= 0x7fff {
+            return None;
+        }
         let ability = list.entity(index)?;
         let slot = mem.read_u32(ability + slot_offset).ok()?;
         // Shop items occupy active slots 4-7; passive shop items use None (23).
-        if !(4..=7).contains(&slot) && slot != 23 { continue; }
+        if !(4..=7).contains(&slot) && slot != 23 {
+            continue;
+        }
         let token = mem.read_u32(ability + token_offset).ok()?;
-        if token != 0 && !tokens.contains(&token) { tokens.push(token); }
+        if token != 0 && !tokens.contains(&token) {
+            tokens.push(token);
+        }
     }
     Some(tokens)
 }

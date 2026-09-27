@@ -2,11 +2,11 @@ import { useState } from "react";
 import type { RecommendationOutcome } from "../../lib/data/recommendation-outcomes.ts";
 import { recommendationDecisions, reviewTimeline, threatEvolution } from "../../lib/match-history";
 
-type Props = { match: RecommendationOutcome; heroNames: Map<number, string>; itemNames: Map<number, string>; itemCategories?: Map<number, string>; heroImages?: Map<number, string>; itemImages?: Map<number, string>; onBack: () => void };
+type Props = { match: RecommendationOutcome; heroNames: Map<number, string>; itemNames: Map<number, string>; itemCategories?: Map<number, string>; heroImages?: Map<number, string>; itemImages?: Map<number, string>; onBack: () => void; onOpenHero?: (heroId: number) => void };
 const clock = (value: number) => `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(Math.floor(value % 60)).padStart(2, "0")}`;
 const number = (value: number | null, digits = 0) => value == null ? "—" : value.toLocaleString(undefined, { maximumFractionDigits: digits });
 
-export function MatchReview({ match, heroNames, itemNames, itemCategories, heroImages, itemImages, onBack }: Props) {
+export function MatchReview({ match, heroNames, itemNames, itemCategories, heroImages, itemImages, onBack, onOpenHero }: Props) {
   const [selectedEvent, setSelectedEvent] = useState<number | null>(null);
   const purchases = [...new Map(match.actualPurchases.filter((p) => p.itemId > 0 && p.gameTime >= 0).sort((a, b) => a.gameTime - b.gameTime).map((p) => [`${p.itemId}:${p.gameTime}`, p])).values()];
   const decisions = recommendationDecisions(match);
@@ -19,7 +19,7 @@ export function MatchReview({ match, heroNames, itemNames, itemCategories, heroI
   return <>
     <header className="match-history-header review-page-head"><small>COUNTERLOCK / MATCH REVIEW</small><button className="review-back" onClick={onBack}>← My matches</button><time>{date}</time></header>
     <div className={`review-result ${match.result}`}>
-      <div className="review-result-main"><span className="review-result-label">{match.result.toUpperCase()}</span><h1>{hero}</h1><p>{match.durationSeconds != null ? clock(match.durationSeconds) : "Duration unavailable"}<span> · </span>Match {match.matchId}</p></div>
+      <div className="review-result-main"><span className="review-result-label">{match.result.toUpperCase()}</span><h1>{hero}</h1>{onOpenHero && <button type="button" className="history-hero-link" onClick={() => onOpenHero(match.heroId)}>OPEN HERO HUB →</button>}<p>{match.durationSeconds != null ? clock(match.durationSeconds) : "Duration unavailable"}<span> · </span>Match {match.matchId}</p></div>
       <div className="review-player">{heroImages?.get(match.heroId) ? <img className="review-avatar" src={heroImages.get(match.heroId)} alt={`${hero} portrait`} /> : <span className="review-avatar" aria-hidden="true">{hero.slice(0, 1).toUpperCase()}</span>}<div><strong>{match.rankSnapshot?.playerName??"Local player"}</strong><small>{match.rankSnapshot?`${match.rankSnapshot.estimatedRankNumber==null?"Rank —":`Rank ${match.rankSnapshot.estimatedRankNumber}`}${match.rankSnapshot.ppScore==null?"":` · PP ${match.rankSnapshot.ppScore}`}`:"Rank unavailable"}</small></div></div>
     </div>
     <div className="review-metrics" aria-label="Match summary">

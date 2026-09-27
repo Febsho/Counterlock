@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { captureHud, checkForDesktopUpdate, desktopAvailable, getDesktopMatch, getDesktopStatus, getDesktopMonitors, getDesktopPreferences, getLastMatch, getRecommendations, installDesktopUpdate, onDesktopMatch, onDesktopStatus, onOpenSettings, onRecommendations, saveDesktopPreferences, setAdvisorEvidence, submitLocalRoster, type DesktopAdvice, type DesktopMatch, type DesktopStatus, type DesktopPreferences, type DesktopMonitor } from "./desktop";
 import { DesktopLivePanel } from "./DesktopLivePanel";
 import { DesktopBuildLab } from "./DesktopBuildLab";
 import { HeroHub } from "./HeroHub";
 import { DiscoverHub } from "./DiscoverHub";
+import { commandPaletteKeyAction, globalSearchRoute, moveSearchSelection, platformShortcutLabel, type SearchResult } from "./lib/global-search";
 import { cachedJson } from "./lib/data/cache";
 import { rankItems } from "./lib/build-engine/scoring";
 import { itemFlowStats, itemStatsUrl } from "./lib/data/deadlock-api";
@@ -23,8 +24,10 @@ import { personalSignals, personalSequencePrior, rankCohort, rankDataHasCoverage
 import { completeRecommendationOutcome, recommendationOutcomeCache, recordRecommendationSnapshot } from "./lib/data/recommendation-outcomes";
 import { MatchHistory, type SteamHistoryProfile } from "./MatchHistory";
 import { laneBuyScore, laneState } from "./lib/match-intelligence/lane";
+import appPackage from "../package.json";
 
 const API = "https://api.deadlock-api.com/v1";
+const APP_VERSION = appPackage.version;
 
 type Lang = "en" | "de";
 type Category = "all" | "weapon" | "vitality" | "spirit";
@@ -66,6 +69,12 @@ type ActiveMatch = { match_id: number | null; start_time: number | null; duratio
 type PatchNote = { title: string; pub_date: string; link: string };
 type CompanionStatus = { in_game: boolean; account_id: number | null; match_id: number | null; joined_at: number | null; hud_capture_available?: boolean; roster_available?: boolean };
 type CompanionRoster = { match_id: number | null; account_id: number | null; duration_s: number | null; match_mode_parsed: string | null; players: ActiveMatchPlayer[] };
+type NavigationIntent =
+  | { target: "hero"; heroId: number }
+  | { target: "item-search"; query: string }
+  | { target: "player-search"; query: string }
+  | { target: "player-profile"; accountId: number }
+  | { target: "build"; heroId: number };
 
 const copy = {
   en: {
@@ -401,8 +410,10 @@ export default function Home() {
   const [desktopTab, setDesktopTab] = useState<"match" | "heroes" | "build" | "discover" | "review" | "history" | "system">("match");
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false);
   const [globalSearchQuery, setGlobalSearchQuery] = useState("");
-  const [globalHeroTarget, setGlobalHeroTarget] = useState<number | null>(null);
-  const [globalDiscoverTarget, setGlobalDiscoverTarget] = useState<{ section: "Items" | "Players"; query: string } | null>(null);
+  const [globalSearchSelection, setGlobalSearchSelection] = useState(0);
+  const globalSearchShortcut = useSyncExternalStore(() => () => {}, () => platformShortcutLabel(navigator.platform ?? ""), () => "Ctrl K");
+  const [navigationState, setNavigationState] = useState<{ id: number; intent: NavigationIntent } | null>(null);
+  const navigationSequenceRef = useRef(0);
   const [matchCompleteNotice, setMatchCompleteNotice] = useState<{ matchId: number; ready: boolean } | null>(null);
   const [unseenReviewMatchId, setUnseenReviewMatchId] = useState<number | null>(null);
   const [desktopLastMatch, setDesktopLastMatch] = useState<DesktopMatch | null>(null);
@@ -418,6 +429,12 @@ export default function Home() {
   const profileRosterKey = desktopLiveMatch?.players.map((player) => player.account_id).filter((id): id is number => id != null).sort((a, b) => a - b).filter((id, index, ids) => index === 0 || id !== ids[index - 1]).join(",") ?? "";
   const playerProfiles = useMemo(() => savedSteamProfile ? { ...liveProfiles, [savedSteamProfile.account_id]: liveProfiles[savedSteamProfile.account_id] ?? { accountId: savedSteamProfile.account_id, name: savedSteamProfile.personaname, avatarUrl: savedSteamProfile.avatar || null, ppScore: null, estimatedRankNumber: null, region: null } } : liveProfiles, [liveProfiles, savedSteamProfile]);
   const ownAccountId = desktopLiveMatch?.account_id ?? savedSteamProfile?.account_id ?? null;
+  function navigateTo(intent: NavigationIntent) {
+    setNavigationState({ id: ++navigationSequenceRef.current, intent });
+    if (intent.target === "hero") setDesktopTab("heroes");
+    else if (intent.target === "item-search" || intent.target === "player-search" || intent.target === "player-profile") setDesktopTab("discover");
+    else { setHeroId(intent.heroId); setDesktopTab("build"); }
+  }
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setGlobalSearchOpen(true); }
@@ -435,11 +452,28 @@ export default function Home() {
       ...(term.length >= 2 ? [{ kind: "Player" as const, label: `Search players for “${globalSearchQuery.trim()}”`, id: 0, image: undefined }] : []),
     ].slice(0, 12);
   }, [globalSearchQuery, heroes, items]);
-  function openGlobalResult(result: (typeof globalSearchResults)[number]) {
+  const globalSearchGroups = useMemo(() => (["Hero", "Item", "Player"] as const).map((kind) => ({ kind, results: globalSearchResults.map((result, index) => ({ result, index })).filter(({ result }) => result.kind === kind) })).filter((group) => group.results.length > 0), [globalSearchResults]);
+  const visibleGlobalSearchSelection = Math.min(globalSearchSelection, Math.max(0, globalSearchResults.length - 1));
+  function openGlobalResult(result: SearchResult) {
     setGlobalSearchOpen(false);
-    if (result.kind === "Hero") { setGlobalHeroTarget(result.id); setDesktopTab("heroes"); }
-    else if (result.kind === "Item") { setGlobalDiscoverTarget({ section: "Items", query: result.label }); setDesktopTab("discover"); }
-    else { setGlobalDiscoverTarget({ section: "Players", query: globalSearchQuery.trim() }); setDesktopTab("discover"); }
+    const route = globalSearchRoute(result, globalSearchQuery);
+    if (route.section === "Heroes") navigateTo({ target: "hero", heroId: route.heroId });
+    else if (route.section === "Items") navigateTo({ target: "item-search", query: route.query });
+    else navigateTo({ target: "player-search", query: route.query });
+  }
+  function handleGlobalSearchKey(event: KeyboardEvent<HTMLInputElement>) {
+    const action = commandPaletteKeyAction(event.key, visibleGlobalSearchSelection, globalSearchResults.length);
+    if (action?.type === "move") {
+      event.preventDefault();
+      setGlobalSearchSelection(action.index);
+    } else if (action?.type === "open") {
+      event.preventDefault();
+      const result = action.index == null ? undefined : globalSearchResults[action.index];
+      if (result) openGlobalResult(result);
+    } else if (action?.type === "close") {
+      event.preventDefault();
+      setGlobalSearchOpen(false);
+    }
   }
 
   useEffect(() => {
@@ -1466,14 +1500,23 @@ export default function Home() {
   const itemImageMap = useMemo(() => new Map(items.flatMap(item => item.shop_image_webp ? [[item.id, item.shop_image_webp] as const] : [])), [items]);
   return (
     <main className={desktopStatus ? "desktop-shell" : undefined}>
-      {globalSearchOpen && <div className="global-search-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setGlobalSearchOpen(false); }}><section className="global-search-dialog" role="dialog" aria-modal="true" aria-label="Global search"><header><span>⌕</span><input autoFocus value={globalSearchQuery} onChange={(event) => setGlobalSearchQuery(event.target.value)} placeholder="Search heroes, items, or players…" /><kbd>ESC</kbd></header><div className="global-search-results">{globalSearchResults.map((result) => <button type="button" key={`${result.kind}-${result.id}`} onClick={() => openGlobalResult(result)}>{result.image && <img src={result.image} alt="" />}<span><small>{result.kind}</small><strong>{result.label}</strong></span><b>↵</b></button>)}{globalSearchQuery.trim() && !globalSearchResults.length && <p>No matching heroes or items. You can still search players.</p>}{!globalSearchQuery.trim() && <p>Type a hero, item, or Steam player name.</p>}</div><footer>Search anywhere <kbd>⌘ K</kbd></footer></section></div>}
-      {desktopStatus && <aside className="desktop-sidebar"><a className="desktop-brand" href="#top"><span>CL</span><b>COUNTERLOCK</b></a><nav aria-label="Desktop navigation">{(["match", "heroes", "build", "discover", "review", "history", "system"] as const).map((tab) => <button key={tab} type="button" className={desktopTab === tab ? "active" : ""} aria-current={desktopTab === tab ? "page" : undefined} onClick={() => { setDesktopTab(tab); if (tab === "heroes") setGlobalHeroTarget(null); if (tab === "discover") setGlobalDiscoverTarget(null); if (tab === "review") setUnseenReviewMatchId(null); }}><i>{tab === "match" ? "◉" : tab === "heroes" ? "♙" : tab === "build" ? "◇" : tab === "discover" ? "⌕" : tab === "review" ? "▤" : tab === "history" ? "◷" : "⚙"}</i>{tab === "match" ? "Current Match" : tab === "heroes" ? "Heroes" : tab === "build" ? "Build Lab" : tab === "discover" ? "Discover" : tab === "review" ? "Match Review" : tab === "history" ? "My Matches" : "Settings"}{tab === "review" && unseenReviewMatchId ? <b className="nav-new">NEW</b> : null}</button>)}</nav><div className="desktop-sidebar-status"><b>DEADLOCK</b><span><i />{desktopStatus.game_running ? "Connected" : "Waiting"}</span><small>v0.1.7</small></div></aside>}
+      {globalSearchOpen && <div className="global-search-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setGlobalSearchOpen(false); }}>
+        <section className="global-search-dialog" role="dialog" aria-modal="true" aria-label="Global search">
+          <header><span>⌕</span><input autoFocus value={globalSearchQuery} onChange={(event) => { setGlobalSearchQuery(event.target.value); setGlobalSearchSelection(0); }} onKeyDown={handleGlobalSearchKey} aria-activedescendant={globalSearchResults[visibleGlobalSearchSelection] ? `global-search-option-${visibleGlobalSearchSelection}` : undefined} placeholder="Search heroes, items, or players…" /><kbd>ESC</kbd></header>
+          <div className="global-search-results" role="listbox" aria-label="Search results">
+            {globalSearchGroups.map((group) => <div className="global-search-group" key={group.kind}><small>{group.kind === "Hero" ? "HEROES" : group.kind === "Item" ? "ITEMS" : "PLAYERS"}</small>{group.results.map(({ result, index }) => <button id={`global-search-option-${index}`} type="button" role="option" aria-selected={index === visibleGlobalSearchSelection} key={`${result.kind}-${result.id}`} onMouseEnter={() => setGlobalSearchSelection(index)} onClick={() => openGlobalResult(result)}>{result.image && <img src={result.image} alt="" />}<span><strong>{result.label}</strong></span><b>↵</b></button>)}</div>)}
+            {globalSearchQuery.trim() && !globalSearchResults.length && <p>No matching heroes or items. You can still search players.</p>}{!globalSearchQuery.trim() && <p>Type a hero, item, or Steam player name.</p>}
+          </div>
+          <footer>Search anywhere <kbd>{globalSearchShortcut}</kbd></footer>
+        </section>
+      </div>}
+      {desktopStatus && <aside className="desktop-sidebar"><a className="desktop-brand" href="#top"><span>CL</span><b>COUNTERLOCK</b></a><nav aria-label="Desktop navigation">{(["match", "heroes", "build", "discover", "review", "history", "system"] as const).map((tab) => <button key={tab} type="button" className={desktopTab === tab ? "active" : ""} aria-current={desktopTab === tab ? "page" : undefined} onClick={() => { setDesktopTab(tab); setNavigationState(null); if (tab === "review") setUnseenReviewMatchId(null); }}><i>{tab === "match" ? "◉" : tab === "heroes" ? "♙" : tab === "build" ? "◇" : tab === "discover" ? "⌕" : tab === "review" ? "▤" : tab === "history" ? "◷" : "⚙"}</i>{tab === "match" ? "Current Match" : tab === "heroes" ? "Heroes" : tab === "build" ? "Build Lab" : tab === "discover" ? "Discover" : tab === "review" ? "Match Review" : tab === "history" ? "My Matches" : "Settings"}{tab === "review" && unseenReviewMatchId ? <b className="nav-new">NEW</b> : null}</button>)}</nav><div className="desktop-sidebar-status"><b>DEADLOCK</b><span><i />{desktopStatus.game_running ? "Connected" : "Waiting"}</span><small>v{APP_VERSION}</small></div></aside>}
       <div className={desktopStatus ? "desktop-workspace" : undefined}>
       <header className={desktopStatus ? "desktop-topbar" : "site-header"}>
         {!desktopStatus && <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></a>}
       {desktopStatus && <div className={`desktop-context-title ${desktopTab === "review" || desktopTab === "history" ? "report-context" : ""}`}><small>{desktopTab === "heroes" ? "HERO ANALYTICS" : desktopTab === "discover" ? "META / PLAYERS / TOOLS" : desktopTab === "review" ? "MATCH REVIEW" : desktopTab === "history" ? "PERSONAL HISTORY" : desktopStatus.in_game ? "LIVE MATCH" : "DEADLOCK COMPANION"}</small><strong>{desktopTab === "heroes" ? "Hero Hub" : desktopTab === "discover" ? "Discover" : desktopTab === "review" ? (completedOutcomes.length ? "Completed match report" : "Review a completed match") : desktopTab === "history" ? "My matches" : desktopStatus.in_game && desktopLiveMatch?.game_time_s != null ? `${Math.floor(desktopLiveMatch.game_time_s / 60)}:${String(desktopLiveMatch.game_time_s % 60).padStart(2, "0")}` : desktopStatus.game_running ? "Waiting for match" : "Ready"}</strong></div>}
         <div className="header-actions">
-          {desktopStatus && <button className="global-search-trigger" type="button" onClick={() => setGlobalSearchOpen(true)}>⌕ <span>Search</span><kbd>⌘ K</kbd></button>}
+          {desktopStatus && <button className="global-search-trigger" type="button" onClick={() => setGlobalSearchOpen(true)}>⌕ <span>Search</span><kbd>{globalSearchShortcut}</kbd></button>}
           {!desktopStatus && <div className={`live-pill companion-${companionStatus}`}><span /> {companionStatus === "connected" ? t.companionConnected : companionStatus === "waiting" ? t.companionSearching : t.companionUnavailable}</div>}
           {!desktopStatus && <button className="header-button patch-button" type="button" onClick={() => void showLatestPatch()}>{t.latestPatch}</button>}
           {!desktopStatus && <button className="header-button theme-toggle" type="button" onClick={() => setDarkMode((current) => !current)} aria-pressed={darkMode}>{darkMode ? `☾ ${t.darkMode}` : `☀ ${t.lightMode}`}</button>}
@@ -1486,11 +1529,11 @@ export default function Home() {
       {desktopStatus && matchCompleteNotice && <aside className="match-complete-toast" role="status" aria-live="polite"><span className="toast-mark">✓</span><div><strong>MATCH COMPLETE</strong><small>{matchCompleteNotice.ready ? "Analysis available" : "Analysis pending"}</small></div><button type="button" onClick={() => { setDesktopTab("review"); setUnseenReviewMatchId(null); setMatchCompleteNotice(null); }}>{matchCompleteNotice.ready ? "VIEW REVIEW" : "VIEW STATUS"}</button><button className="toast-dismiss" type="button" aria-label="Dismiss match complete notice" onClick={() => setMatchCompleteNotice(null)}>×</button></aside>}
       {patchOpen && !desktopStatus && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
 
-      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} profiles={playerProfiles} items={items} advice={desktopAdvice} recommendations={buildRecommendations} laneOpponentId={laneOpponentId} laneName={lane === "all" ? "unknown" : lane} onOpenBuild={() => setDesktopTab("build")} />}
-      {desktopStatus && desktopTab === "heroes" && <HeroHub key={globalHeroTarget ?? "default"} heroes={heroes} items={items} initialHeroId={globalHeroTarget} onOpenBuild={(selectedHeroId) => { setHeroId(selectedHeroId); setDesktopTab("build"); }} />}
-      {desktopStatus && desktopTab === "discover" && <DiscoverHub key={`${globalDiscoverTarget?.section ?? "default"}:${globalDiscoverTarget?.query ?? ""}`} heroes={heroes} items={items} accountId={ownAccountId} estimatedRank={ownAccountId == null ? null : playerProfiles[ownAccountId]?.estimatedRankNumber ?? null} initialSearch={globalDiscoverTarget?.query} initialSection={globalDiscoverTarget?.section} laneSuggestion={liveLaneSuggestion} onOpenBuild={(selectedHeroId) => { setHeroId(selectedHeroId); setDesktopTab("build"); }} />}
+      {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} profiles={playerProfiles} items={items} advice={desktopAdvice} recommendations={buildRecommendations} laneOpponentId={laneOpponentId} laneName={lane === "all" ? "unknown" : lane} onOpenBuild={() => navigateTo({ target: "build", heroId })} onOpenHero={(selectedHeroId) => navigateTo({ target: "hero", heroId: selectedHeroId })} />}
+      {desktopStatus && desktopTab === "heroes" && <HeroHub key={navigationState?.intent.target === "hero" ? navigationState.id : "default"} heroes={heroes} items={items} initialHeroId={navigationState?.intent.target === "hero" ? navigationState.intent.heroId : null} onOpenBuild={(selectedHeroId) => navigateTo({ target: "build", heroId: selectedHeroId })} onOpenPlayer={(accountId) => navigateTo({ target: "player-profile", accountId })} />}
+      {desktopStatus && desktopTab === "discover" && <DiscoverHub key={navigationState?.intent.target === "item-search" || navigationState?.intent.target === "player-search" || navigationState?.intent.target === "player-profile" ? navigationState.id : "default"} heroes={heroes} items={items} accountId={ownAccountId} estimatedRank={ownAccountId == null ? null : playerProfiles[ownAccountId]?.estimatedRankNumber ?? null} initialSearch={navigationState?.intent.target === "item-search" || navigationState?.intent.target === "player-search" ? navigationState.intent.query : undefined} initialSection={navigationState?.intent.target === "item-search" ? "Items" : navigationState?.intent.target === "player-search" || navigationState?.intent.target === "player-profile" ? "Players" : undefined} initialPlayerId={navigationState?.intent.target === "player-profile" ? navigationState.intent.accountId : undefined} laneSuggestion={liveLaneSuggestion} onOpenBuild={(selectedHeroId) => navigateTo({ target: "build", heroId: selectedHeroId })} />}
       {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} profiles={playerProfiles} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={liveAdviceForMatch} recommendations={buildRecommendations} communityBuildItems={communityBuildItems} abilityOrders={abilityOrders} heroAbilities={heroAbilities} />}
-      {desktopStatus && (desktopTab === "review" || desktopTab === "history") && <MatchHistory key={desktopTab} outcomes={completedOutcomes} pendingMatches={Object.entries(localOutcomeCache.pending).map(([matchId, value]) => ({ matchId: Number(matchId), ...value }))} accountId={ownAccountId} playerName={ownAccountId == null ? null : playerProfiles[ownAccountId]?.name} onLinkSteamProfile={linkHistorySteamProfile} onForgetSteamProfile={forgetSteamProfile} heroNames={heroNameMap} itemNames={itemNameMap} itemCategories={itemCategoryMap} heroImages={heroImageMap} itemImages={itemImageMap} initialReview={desktopTab === "review"} />}
+      {desktopStatus && (desktopTab === "review" || desktopTab === "history") && <MatchHistory key={desktopTab} outcomes={completedOutcomes} pendingMatches={Object.entries(localOutcomeCache.pending).map(([matchId, value]) => ({ matchId: Number(matchId), ...value }))} accountId={ownAccountId} playerName={ownAccountId == null ? null : playerProfiles[ownAccountId]?.name} onLinkSteamProfile={linkHistorySteamProfile} onForgetSteamProfile={forgetSteamProfile} onOpenHero={(selectedHeroId) => navigateTo({ target: "hero", heroId: selectedHeroId })} heroNames={heroNameMap} itemNames={itemNameMap} itemCategories={itemCategoryMap} heroImages={heroImageMap} itemImages={itemImageMap} initialReview={desktopTab === "review"} />}
       {desktopStatus && desktopTab === "system" && <section className="desktop-system-page" aria-label="Settings"><div className="desktop-system-heading"><small>COUNTERLOCK / PREFERENCES</small><h1>Settings</h1><p>Manage your desktop experience and check the local game connection.</p></div><div className="desktop-system-grid">
         <article><h2>Game connection</h2><dl><div><dt>Deadlock</dt><dd>{desktopStatus.game_running ? "Running" : "Not running"}</dd></div><div><dt>Process ID</dt><dd>{desktopStatus.pid ?? "—"}</dd></div><div><dt>Steam build</dt><dd>{desktopStatus.build_id ?? "Unknown"}</dd></div><div><dt>Live source</dt><dd>{desktopStatus.provider}</dd></div><div><dt>Console phase</dt><dd>{desktopStatus.console_phase ?? "No verified event"}</dd></div><div><dt>Match ID</dt><dd>{desktopStatus.match_id ?? "Unavailable"}</dd></div><div><dt>Inventory</dt><dd>{desktopStatus.capabilities.items ? "Available" : "Not available"}</dd></div><div><dt>Install path</dt><dd>{desktopStatus.installation_path ?? "Not detected"}</dd></div></dl>{desktopStatus.last_error && <p className="desktop-system-error">{desktopStatus.last_error}</p>}{desktopLastMatch && <p className="desktop-system-note">Last match: {desktopLastMatch.match_id ?? "ID unknown"} · {desktopLastMatch.source}</p>}</article>
         <article><h2>Desktop settings</h2><label><input type="checkbox" checked={desktopPreferences?.close_to_tray ?? true} onChange={(event) => void updateDesktopPreferences({ close_to_tray: event.target.checked })} />{lang === "de" ? "Beim Schließen im Tray weiterlaufen" : "Keep running in tray when closing"}</label><label><input type="checkbox" checked={desktopPreferences?.compact_always_on_top ?? true} onChange={(event) => void updateDesktopPreferences({ compact_always_on_top: event.target.checked })} />{lang === "de" ? "Kompaktfenster immer im Vordergrund" : "Keep compact window always on top"}</label><p>Game memory is read locally. Screenshots and unspent shop balance are separate capabilities.</p><hr /><h2>{lang === "de" ? "Software-Updates" : "Software updates"}</h2><button type="button" disabled={updateBusy} onClick={() => void checkDesktopUpdates()}>{updateBusy ? (lang === "de" ? "BITTE WARTEN …" : "PLEASE WAIT…") : (lang === "de" ? "NACH UPDATES SUCHEN" : "CHECK FOR UPDATES")}</button>{updateStatus && <p role="status">{updateStatus}</p>}</article>

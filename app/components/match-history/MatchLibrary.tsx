@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from "react";
 import type { RecommendationOutcome } from "../../lib/data/recommendation-outcomes.ts";
+import { steamAccountId } from "../../lib/steam-account-id";
 import type { SteamHistoryProfile } from "../../MatchHistory";
 
 type PendingMatch = { matchId: number; heroId: number; recommendations: Array<{ gameTime: number; recommendedItemId: number; score: number }>; matchMode?: string | null; rankSnapshot?: RecommendationOutcome["rankSnapshot"] };
@@ -53,7 +54,6 @@ export function MatchLibrary({ outcomes, pendingMatches, heroNames, itemNames, h
   </>;
 }
 function initialLinkNeeded(accountId: number | null | undefined, onLink: Props["onLinkSteamProfile"]) { return accountId == null && Boolean(onLink); }
-function steamAccountId(input: string): number | null { const value = input.trim(), steam3 = value.match(/^\[?U:1:(\d+)\]?$/i)?.[1], profile = value.match(/steamcommunity\.com\/profiles\/(\d+)/i)?.[1], raw = steam3 ?? profile ?? (/^\d+$/.test(value) ? value : ""); if (!raw) return null; try { const id = BigInt(raw), base = BigInt("76561197960265728"), accountId = id > BigInt("4294967295") ? id - base : id; return accountId > BigInt(0) && accountId <= BigInt("4294967295") ? Number(accountId) : null; } catch { return null; } }
 function steamProfile(value: unknown, fallbackId?: number): SteamHistoryProfile[] { if (!value || typeof value !== "object") return []; const row = value as Record<string, unknown>, accountId = Number.isInteger(row.account_id) ? row.account_id as number : fallbackId; if (!accountId) return []; return [{ account_id: accountId, personaname: typeof row.personaname === "string" && row.personaname ? row.personaname : `Steam ${accountId}`, profileurl: typeof row.profileurl === "string" ? row.profileurl : "", avatar: typeof row.avatarfull === "string" ? row.avatarfull : typeof row.avatar === "string" ? row.avatar : "" }]; }
 function clock(seconds: number) { return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`; }
 function rankedQueue(mode:string|null|undefined):boolean|null { if(!mode)return null;const value=mode.toLowerCase();if(value.includes("unranked")||value.includes("normal"))return false;if(value.includes("ranked"))return true;return null; }
