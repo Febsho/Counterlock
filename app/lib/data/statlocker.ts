@@ -2,7 +2,7 @@ import { buildPersonalHeroProfile, type PersonalHeroProfile, type PersonalMatch 
 import { DEADLOCK_API } from "./deadlock-api.ts";
 
 export type StatlockerStatus = "connected" | "not_configured" | "unauthorized" | "forbidden" | "rate_limited" | "unavailable";
-export type StatlockerProfile = { accountId: number; name: string | null; avatarUrl: string | null; ppScore: number | null; estimatedRankNumber: number | null; region: string | null };
+export type StatlockerProfile = { accountId: number; name: string | null; avatarUrl: string | null; ppScore: number | null; estimatedRankNumber: number | null; rankSource?: "deadlock_api" | "statlocker"; region: string | null };
 const profileCache = new Map<number, { until: number; profile: StatlockerProfile | null; status: StatlockerStatus }>();
 const profileRequests = new Map<string, Promise<{ status: StatlockerStatus; profiles: StatlockerProfile[] }>>();
 const statlockerProxy = (path: string) => {
@@ -25,39 +25,64 @@ export async function fetchStatlockerProfiles(accountIds: number[]) {
     return { status: result.status, profiles: [...cachedProfiles, ...result.profiles].filter((profile, index, list) => list.findIndex((item) => item.accountId === profile.accountId) === index) };
   }
   const request = (async () => {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2500);
-    const response = await fetch(statlockerProxy("profiles"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ids), signal: controller.signal }).finally(() => clearTimeout(timeout));
-    if (!response.ok) return { status: "unavailable" as const, profiles: [] };
-    const payload: unknown = await response.json();
-    if (!payload || typeof payload !== "object") return { status: "unavailable" as const, profiles: [] };
-    const data = payload as { status?: StatlockerStatus; profiles?: unknown };
-    const allowed: StatlockerStatus[] = ["connected", "not_configured", "unauthorized", "forbidden", "rate_limited", "unavailable"];
-    const profiles = Array.isArray(data.profiles) ? data.profiles.flatMap((raw) => {
-      if (!raw || typeof raw !== "object") return [];
-      const profile = raw as Record<string, unknown>;
-      const rank = profile.estimatedRankNumber;
-      return Number.isInteger(profile.accountId) && missing.includes(profile.accountId as number)
-        ? [{ accountId: profile.accountId as number, name: typeof profile.name === "string" ? profile.name : null,
-          avatarUrl: typeof profile.avatarUrl === "string" ? profile.avatarUrl : null,
-          ppScore: Number.isFinite(profile.ppScore) ? profile.ppScore as number : null,
-          estimatedRankNumber: Number.isInteger(rank) && (rank as number) >= 11 && (rank as number) <= 116 ? rank as number : null,
-          region: typeof profile.region === "string" ? profile.region : null }] : [];
-    }) : [];
-    const status = allowed.includes(data.status as StatlockerStatus) ? data.status! : "unavailable" as const;
-    const fetched = new Map(profiles.map((profile) => [profile.accountId, profile]));
-    missing.forEach((id) => {
-      const profile = fetched.get(id) ?? null;
-      // Missing names should be retried while a live roster is still present.
-      const ttl = profile?.name ? 15 * 60_000 : 60_000;
-      profileCache.set(id, { profile, until: Date.now() + ttl, status });
-    });
-    return { status, profiles };
-  } catch (error) {
-    console.warn("Optional Statlocker profile source is unavailable; recommendations use live and Deadlock API evidence.", error);
-    return { status: "unavailable" as const, profiles: [] };
-  }
+  const query = new URLSearchParams({ account_ids: ids.join(",") }).toString();
+  const getJson = async (url: string) => {
+    const response = await fetch(url, { signal: AbortSignal.timeout(2500) });
+    if (!response.ok) throw new Error(`Profile source returned ${response.status}`);
+    return response.json() as Promise<unknown>;
+  };
+  const [statlockerResult, steamResult, ranksResult] = await Promise.allSettled([
+    (async () => {
+      const response = await fetch(statlockerProxy("profiles"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ids), signal: AbortSignal.timeout(2500) });
+      if (!response.ok) throw new Error(`Statlocker returned ${response.status}`);
+      return await response.json() as { status?: StatlockerStatus; profiles?: unknown };
+    })(),
+    getJson(`${DEADLOCK_API}/players/steam?${query}`),
+    getJson(`${DEADLOCK_API}/players/rank?${query}`),
+  ]);
+  const byId = new Map<number, StatlockerProfile>();
+  const steamRows = steamResult.status === "fulfilled" && Array.isArray(steamResult.value) ? steamResult.value : [];
+  steamRows.forEach((raw) => {
+    if (!raw || typeof raw !== "object") return;
+    const row = raw as Record<string, unknown>, id = row.account_id;
+    if (!Number.isInteger(id) || !missing.includes(id as number)) return;
+    const profile: StatlockerProfile = byId.get(id as number) ?? { accountId: id as number, name: null, avatarUrl: null, ppScore: null, estimatedRankNumber: null, region: null };
+    profile.name = typeof row.personaname === "string" && row.personaname.trim() ? row.personaname : profile.name;
+    profile.avatarUrl = typeof row.avatarfull === "string" ? row.avatarfull : typeof row.avatar === "string" ? row.avatar : profile.avatarUrl;
+    byId.set(profile.accountId, profile);
+  });
+  const rankRows = ranksResult.status === "fulfilled" && Array.isArray(ranksResult.value) ? ranksResult.value : [];
+  rankRows.forEach((raw) => {
+    if (!raw || typeof raw !== "object") return;
+    const row = raw as Record<string, unknown>, id = row.account_id, badge = row.badge;
+    if (!Number.isInteger(id) || !missing.includes(id as number)) return;
+    const profile: StatlockerProfile = byId.get(id as number) ?? { accountId: id as number, name: null, avatarUrl: null, ppScore: null, estimatedRankNumber: null, region: null };
+    profile.estimatedRankNumber = Number.isInteger(badge) && (badge as number) >= 11 && (badge as number) <= 116 ? badge as number : null;
+    profile.rankSource = "deadlock_api";
+    byId.set(profile.accountId, profile);
+  });
+  const statlockerData = statlockerResult.status === "fulfilled" ? statlockerResult.value : null;
+  const allowed: StatlockerStatus[] = ["connected", "not_configured", "unauthorized", "forbidden", "rate_limited", "unavailable"];
+  const status = statlockerData && allowed.includes(statlockerData.status as StatlockerStatus) ? statlockerData.status! :
+    steamResult.status === "fulfilled" || ranksResult.status === "fulfilled" ? "connected" as const : "unavailable" as const;
+  if (Array.isArray(statlockerData?.profiles)) statlockerData.profiles.forEach((raw) => {
+    if (!raw || typeof raw !== "object") return;
+    const row = raw as Record<string, unknown>, id = row.accountId, rank = row.estimatedRankNumber;
+    if (!Number.isInteger(id) || !missing.includes(id as number)) return;
+    const profile: StatlockerProfile = byId.get(id as number) ?? { accountId: id as number, name: null, avatarUrl: null, ppScore: null, estimatedRankNumber: null, region: null };
+    profile.name = profile.name ?? (typeof row.name === "string" ? row.name : null);
+    profile.avatarUrl = profile.avatarUrl ?? (typeof row.avatarUrl === "string" ? row.avatarUrl : null);
+    profile.ppScore = Number.isFinite(row.ppScore) ? row.ppScore as number : null;
+    if (!profile.rankSource && Number.isInteger(rank) && (rank as number) >= 11 && (rank as number) <= 116) { profile.estimatedRankNumber = rank as number; profile.rankSource = "statlocker"; }
+    profile.region = typeof row.region === "string" ? row.region : null;
+    byId.set(profile.accountId, profile);
+  });
+  const profiles = [...byId.values()];
+  missing.forEach((id) => {
+    const profile = byId.get(id) ?? null;
+    profileCache.set(id, { profile, until: Date.now() + (profile?.name ? 15 * 60_000 : 60_000), status });
+  });
+  return { status, profiles };
   })();
   profileRequests.set(key, request);
   try {
@@ -113,12 +138,18 @@ export async function syncPersonalHeroProfile(accountId: number, heroId: number,
     const history: unknown = await historyResponse.json();
     if (!Array.isArray(history)) return buildPersonalHeroProfile(accountId, heroId, cached, profile);
     const cachedIds = new Set(cached.map((match) => match.matchId));
-    const ids = history.flatMap((entry) => {
+    const historyRows = history.flatMap((entry) => {
       if (!entry || typeof entry !== "object") return [];
       const row = entry as Record<string, unknown>, id = row.match_id ?? row.matchId;
-      const matchHero = row.hero_id ?? row.heroId;
-      return Number.isSafeInteger(id) && Number.isInteger(matchHero) && matchHero === heroId && !cachedIds.has(id as number) ? [id as number] : [];
+      const matchHero = row.hero_id ?? row.heroId, result = row.player_match_outcome;
+      return Number.isSafeInteger(id) && Number.isInteger(matchHero) && matchHero === heroId && !cachedIds.has(id as number) && (result === 1 || result === 2) ? [{ row, matchId: id as number, matchHero: matchHero as number, won: result === 1 }] : [];
     }).slice(0, Math.max(0, 50 - cached.filter((match) => match.heroId === heroId).length));
+    const ids = historyRows.map((match) => match.matchId);
+    cached.push(...historyRows.map(({ row, matchId, matchHero, won }) => ({ matchId, heroId: matchHero, won,
+      gameDurationSeconds: finite(row.match_duration_s) ?? 0, items: [],
+      kda: finite(row.player_kills) != null && finite(row.player_deaths) != null && finite(row.player_assists) != null ? ((finite(row.player_kills) ?? 0) + (finite(row.player_assists) ?? 0)) / Math.max(1, finite(row.player_deaths) ?? 0) : null,
+      spm: null, damagePerMinute: null, killParticipation: null, mvpScore: null,
+    })));
     for (let start = 0; start < ids.length; start += 50) {
       const response = await fetch(statlockerProxy("matches"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ids.slice(start, start + 50)) });
       if (!response.ok) break;

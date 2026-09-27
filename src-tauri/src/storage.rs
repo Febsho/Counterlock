@@ -153,6 +153,12 @@ impl Storage {
         .map_err(Into::into)
     }
 
+    pub fn next_statlocker_retry_at(&self) -> Result<Option<i64>> {
+        let db = self.0.lock().unwrap();
+        db.query_row("SELECT MIN(next_attempt_at) FROM statlocker_outbox", [], |row| row.get(0))
+            .map_err(Into::into)
+    }
+
     pub fn complete_statlocker_match(&self, match_id: u64) -> Result<()> {
         let db = self.0.lock().unwrap();
         db.execute("DELETE FROM statlocker_outbox WHERE match_id = ?1", [match_id])?;

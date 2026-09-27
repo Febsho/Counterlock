@@ -47,6 +47,9 @@ type Item = {
   component_items?: string[];
 };
 type ItemStat = { item_id: number; wins: number; losses: number; matches: number; players: number; avg_buy_time_s: number };
+type CommunityBuildItem = { itemId: number; builds: number };
+type AbilityOrder = { abilities: number[]; wins: number; losses: number; matches: number };
+type HeroAbility = { id: number; name: string };
 type EnemyBuildSignal = { heroId: number; stats: ItemStat[] };
 type CounterStat = { hero_id: number; enemy_hero_id: number; wins: number; matches_played: number };
 type EnemyItemRate = { heroId: number; rate: number; matches: number; lift: number };
@@ -359,6 +362,9 @@ export default function Home() {
   const [presetMessage, setPresetMessage] = useState("");
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [itemFlow, setItemFlow] = useState<import("./lib/data/deadlock-api").ItemFlowStats | null>(null);
+  const [communityBuildItems, setCommunityBuildItems] = useState<CommunityBuildItem[]>([]);
+  const [abilityOrders, setAbilityOrders] = useState<AbilityOrder[]>([]);
+  const [heroAbilities, setHeroAbilities] = useState<Map<number, string>>(new Map());
   const [enemyBuildSignals, setEnemyBuildSignals] = useState<EnemyBuildSignal[]>([]);
   const [matchup, setMatchup] = useState<CounterStat | null>(null);
   const [allCounterStats, setAllCounterStats] = useState<CounterStat[]>([]);
@@ -782,14 +788,41 @@ export default function Home() {
       const livePurchaseStats = settlePerEnemy(unwrap(responses[7], "live purchase-time matchup statistics", []), "live purchase-time matchup statistics");
       const laneItemStats = unwrap(responses[8], "same-lane early item statistics", [] as ItemStat[]);
       const flowQuery = new URLSearchParams(commonParams); flowQuery.set("hero_ids", String(heroId));
-      const flowResult = await Promise.allSettled([itemFlowStats(`${API}/analytics/item-flow-stats?${flowQuery}`)]);
+      const buildStatsUrl = `${API}/analytics/build-item-stats?hero_id=${heroId}&min_last_updated_unix_timestamp=${Math.floor(Date.now() / 1000) - dataWindow * 86400}`;
+      const abilityOrderParams = new URLSearchParams(commonParams); abilityOrderParams.set("hero_id", String(heroId)); abilityOrderParams.set("min_matches", "10");
+      const [flowResult, buildStatsResult, abilityOrderResult] = await Promise.allSettled([
+        itemFlowStats(`${API}/analytics/item-flow-stats?${flowQuery}`),
+        cachedJson<unknown>(buildStatsUrl, 60 * 60 * 1000),
+        cachedJson<unknown>(`${API}/analytics/ability-order-stats?${abilityOrderParams}`, 60 * 60 * 1000),
+      ]);
       if (runId !== analysisRunRef.current) return;
       setItemFlow(flowResult[0].status === "fulfilled" ? flowResult[0].value : null);
+      const buildRows = buildStatsResult.status === "fulfilled" && Array.isArray(buildStatsResult.value) ? buildStatsResult.value : [];
+      setCommunityBuildItems(buildRows.flatMap((raw) => {
+        if (!raw || typeof raw !== "object") return [];
+        const row = raw as Record<string, unknown>;
+        return Number.isInteger(row.item_id) && Number.isFinite(row.builds) && (row.builds as number) > 0 ? [{ itemId: row.item_id as number, builds: row.builds as number }] : [];
+      }).sort((a, b) => b.builds - a.builds));
+      const orderRows = abilityOrderResult.status === "fulfilled" && Array.isArray(abilityOrderResult.value) ? abilityOrderResult.value : [];
+      setAbilityOrders(orderRows.flatMap((raw) => {
+        if (!raw || typeof raw !== "object") return [];
+        const row = raw as Record<string, unknown>;
+        return Array.isArray(row.abilities) && row.abilities.every((id) => Number.isInteger(id)) && Number.isFinite(row.wins) && Number.isFinite(row.losses) && Number.isFinite(row.matches)
+          ? [{ abilities: row.abilities as number[], wins: row.wins as number, losses: row.losses as number, matches: row.matches as number }] : [];
+      }).sort((a, b) => b.matches - a.matches));
       if (flowResult[0].status === "rejected") console.warn("Optional Deadlock item-flow data unavailable; continuing with item and matchup statistics.", flowResult[0].reason);
       if (runId !== analysisRunRef.current) return;
-      const abilityResults = await Promise.allSettled(enemyIds.map((enemyId) => cachedJson<HeroAbilityEvidence[]>(`${API}/assets/items/by-hero-id/${enemyId}?language=english`, 24 * 60 * 60 * 1000)));
-      const enemyThreatProfiles = new Map(enemyIds.map((enemyId, index) => [enemyId, mergedHeroThreats(enemyId, abilityResults[index].status === "fulfilled" ? abilityResults[index].value : [])]));
+      const abilityHeroIds = [...new Set([heroId, ...enemyIds])];
+      const abilityResults = await Promise.allSettled(abilityHeroIds.map((abilityHeroId) => cachedJson<HeroAbilityEvidence[]>(`${API}/assets/items/by-hero-id/${abilityHeroId}?language=english`, 24 * 60 * 60 * 1000)));
       if (runId !== analysisRunRef.current) return;
+      const ownAbilityIndex = abilityHeroIds.indexOf(heroId);
+      const ownAbilityRows = abilityResults[ownAbilityIndex]?.status === "fulfilled" ? abilityResults[ownAbilityIndex].value : [];
+      setHeroAbilities(new Map(ownAbilityRows.flatMap((raw) => {
+        const row = raw as HeroAbilityEvidence & { id?: number; ability_id?: number; name?: string };
+        const id = row.id ?? row.ability_id;
+        return Number.isInteger(id) && typeof row.name === "string" ? [[id!, row.name] as const] : [];
+      })));
+      const enemyThreatProfiles = new Map(enemyIds.map((enemyId) => { const index = abilityHeroIds.indexOf(enemyId); return [enemyId, mergedHeroThreats(enemyId, abilityResults[index]?.status === "fulfilled" ? abilityResults[index].value : [])] as const; }));
       const baseMap = new Map(baseStats.map((stat) => [stat.item_id, stat]));
       const teamMap = new Map(teamStats.map((stat) => [stat.item_id, stat]));
       const carryMap = new Map(carryStats.map((stat) => [stat.item_id, stat]));
@@ -928,7 +961,12 @@ export default function Home() {
     const nextCore = pathCandidates.find(entry => entry.itemId === normalCoreNextId);
     const nearSpike = nextCore && liveSouls != null && nextCore.cost != null ? { itemId: nextCore.itemId, score: nextCore.coreFit, estimatedSoulsRemaining: Math.max(0,nextCore.cost-liveSouls), currentProgress: Math.max(0,Math.min(1,liveSouls/Math.max(1,nextCore.cost))), reason: "Core path item-flow timing" } : null;
     const flowPhase = itemFlowPhase(effectiveGameTimeSeconds);
-    const nextBuyOrder = rankNextBuys(pathCandidates.map((entry) => { const deviation = buildDeviation({normalNextItemId:normalCoreNextId,candidateItemId:entry.itemId,delayedItems:entry.itemId===normalCoreNextId?[]:[normalCoreNextId??0].filter(Boolean),soulDelayCost:entry.itemId===normalCoreNextId?0:Math.min(.08,(entry.cost??0)/50000),flowTransitionPenalty:entry.itemId===normalCoreNextId||flowSet.has(entry.itemId)?0:.025,slotPressurePenalty:0,powerSpikeDelay:entry.itemId!==normalCoreNextId&&shouldPreservePowerSpike(nearSpike,entry.counterUrgency)? .08:0}); const sequenceEvidence = flowItemEvidence(itemFlow, entry.itemId, flowPhase, allOwnedItemIds); return { ...entry, pathSynergy: Math.max(sequenceEvidence, personalSequencePrior(activePersonalProfile, allOwnedItemIds, entry.itemId)), timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - effectiveGameTimeSeconds) / 900), affordabilityUtility: entry.cost == null || liveSouls == null ? 0 : liveSouls >= entry.cost ? 1 : -Math.min(1, (entry.cost - liveSouls) / 5000), deviationCost: deviation.totalDeviationCost, opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 }; }));
+    const knownTimeline = pathCandidates.filter((entry) => entry.buyTime != null);
+    const inTimelineWindow = knownTimeline.filter((entry) => entry.buyTime! <= effectiveGameTimeSeconds + 360);
+    const rankPool = inTimelineWindow.length ? inTimelineWindow : knownTimeline.length
+      ? [knownTimeline.reduce((closest, entry) => Math.abs(entry.buyTime! - effectiveGameTimeSeconds) < Math.abs(closest.buyTime! - effectiveGameTimeSeconds) ? entry : closest)]
+      : pathCandidates;
+    const nextBuyOrder = rankNextBuys(rankPool.map((entry) => { const deviation = buildDeviation({normalNextItemId:normalCoreNextId,candidateItemId:entry.itemId,delayedItems:entry.itemId===normalCoreNextId?[]:[normalCoreNextId??0].filter(Boolean),soulDelayCost:entry.itemId===normalCoreNextId?0:Math.min(.08,(entry.cost??0)/50000),flowTransitionPenalty:entry.itemId===normalCoreNextId||flowSet.has(entry.itemId)?0:.025,slotPressurePenalty:0,powerSpikeDelay:entry.itemId!==normalCoreNextId&&shouldPreservePowerSpike(nearSpike,entry.counterUrgency)? .08:0}); const sequenceEvidence = flowItemEvidence(itemFlow, entry.itemId, flowPhase, allOwnedItemIds); return { ...entry, pathSynergy: Math.max(sequenceEvidence, personalSequencePrior(activePersonalProfile, allOwnedItemIds, entry.itemId)), timingFit: entry.buyTime == null ? 0.5 : 1 / (1 + Math.abs(entry.buyTime - effectiveGameTimeSeconds) / 300), affordabilityUtility: entry.cost == null || liveSouls == null ? 0 : liveSouls >= entry.cost ? 1 : -Math.min(1, (entry.cost - liveSouls) / 5000), deviationCost: deviation.totalDeviationCost, opportunityCost: entry.cost != null && buildStyle === "safe" && entry.cost > 6400 ? 0.04 : 0 }; }));
     const nextBuyScores = new Map(nextBuyOrder.map((entry) => [entry.itemId, entry.nextBuyScore]));
     const pathIds = planPurchasePath(pathCandidates, itemFlow, 16);
     const priorityIds = [...new Set([...nextBuyOrder.slice(0, 1).map((entry) => entry.itemId), ...pathIds])].slice(0, 16);
@@ -1330,7 +1368,7 @@ export default function Home() {
       <div className={desktopStatus ? "desktop-workspace" : undefined}>
       <header className={desktopStatus ? "desktop-topbar" : "site-header"}>
         {!desktopStatus && <a className="brand" href="#top" aria-label={t.home}><span className="brand-mark">CL</span><span><strong>COUNTER</strong>LOCK</span></a>}
-        {desktopStatus && <div className={`desktop-context-title ${desktopTab === "review" || desktopTab === "history" ? "report-context" : ""}`}><small>{desktopTab === "review" ? "MATCH REVIEW" : desktopTab === "history" ? "PERSONAL HISTORY" : desktopStatus.in_game ? "LIVE MATCH" : "DEADLOCK COMPANION"}</small><strong>{desktopTab === "review" ? "Completed match report" : desktopTab === "history" ? "My matches" : desktopStatus.in_game && desktopLiveMatch?.game_time_s != null ? `${Math.floor(desktopLiveMatch.game_time_s / 60)}:${String(desktopLiveMatch.game_time_s % 60).padStart(2, "0")}` : desktopStatus.game_running ? "Waiting for match" : "Ready"}</strong></div>}
+      {desktopStatus && <div className={`desktop-context-title ${desktopTab === "review" || desktopTab === "history" ? "report-context" : ""}`}><small>{desktopTab === "review" ? "MATCH REVIEW" : desktopTab === "history" ? "PERSONAL HISTORY" : desktopStatus.in_game ? "LIVE MATCH" : "DEADLOCK COMPANION"}</small><strong>{desktopTab === "review" ? (completedOutcomes.length ? "Completed match report" : "Review a completed match") : desktopTab === "history" ? "My matches" : desktopStatus.in_game && desktopLiveMatch?.game_time_s != null ? `${Math.floor(desktopLiveMatch.game_time_s / 60)}:${String(desktopLiveMatch.game_time_s % 60).padStart(2, "0")}` : desktopStatus.game_running ? "Waiting for match" : "Ready"}</strong></div>}
         <div className="header-actions">
           {!desktopStatus && <div className={`live-pill companion-${companionStatus}`}><span /> {companionStatus === "connected" ? t.companionConnected : companionStatus === "waiting" ? t.companionSearching : t.companionUnavailable}</div>}
           {!desktopStatus && <button className="header-button patch-button" type="button" onClick={() => void showLatestPatch()}>{t.latestPatch}</button>}
@@ -1345,9 +1383,9 @@ export default function Home() {
       {patchOpen && !desktopStatus && <aside className="patch-panel" aria-live="polite"><button type="button" className="patch-close" onClick={() => setPatchOpen(false)} aria-label="Close">×</button><small>{t.latestPatch}</small>{patchBusy && <strong>{t.loadingPatch}</strong>}{patchError && <strong>{t.patchUnavailable}</strong>}{patchNote && <><strong>{patchNote.title}</strong><time>{new Date(patchNote.pub_date).toLocaleDateString(lang === "de" ? "de-DE" : "en-US", { year: "numeric", month: "long", day: "numeric" })}</time><a href={patchNote.link} target="_blank" rel="noreferrer">{t.openPatch} →</a></>}</aside>}
 
       {desktopStatus && desktopTab === "match" && <DesktopLivePanel status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} profiles={playerProfiles} items={items} advice={desktopAdvice} recommendations={buildRecommendations} laneOpponentId={laneOpponentId} laneName={lane === "all" ? "unknown" : lane} onOpenBuild={() => setDesktopTab("build")} />}
-      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} profiles={playerProfiles} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={liveAdviceForMatch} recommendations={buildRecommendations} />}
-      {desktopStatus && (desktopTab === "review" || desktopTab === "history") && <MatchHistory key={desktopTab} outcomes={completedOutcomes} pendingMatches={Object.entries(localOutcomeCache.pending).map(([matchId, value]) => ({ matchId: Number(matchId), ...value }))} heroNames={heroNameMap} itemNames={itemNameMap} itemCategories={itemCategoryMap} heroImages={heroImageMap} itemImages={itemImageMap} initialReview={desktopTab === "review"} />}
-      {desktopStatus && desktopTab === "system" && <section className="desktop-system-page" aria-label="System diagnostics"><div className="desktop-system-heading"><small>COUNTERLOCK / SYSTEM</small><h1>System & diagnostics</h1><p>Runtime details and local desktop preferences.</p></div><div className="desktop-system-grid">
+      {desktopStatus && desktopTab === "build" && <DesktopBuildLab status={desktopStatus} match={desktopLiveMatch} heroes={heroMap} items={items} profiles={playerProfiles} lang={lang} plan={fullBuildPlan} cost={fullBuildCost} remainingCost={remainingBuildCost} ownedItemIds={allOwnedItemIds} liveOwnedItemIds={desktopOwnedItemIds} onToggleOwned={toggleOwnedItem} onSave={saveSetup} onLoad={loadSetup} presetMessage={presetMessage} buyTarget={buyTarget} advice={liveAdviceForMatch} recommendations={buildRecommendations} communityBuildItems={communityBuildItems} abilityOrders={abilityOrders} heroAbilities={heroAbilities} />}
+      {desktopStatus && (desktopTab === "review" || desktopTab === "history") && <MatchHistory key={desktopTab} outcomes={completedOutcomes} pendingMatches={Object.entries(localOutcomeCache.pending).map(([matchId, value]) => ({ matchId: Number(matchId), ...value }))} accountId={ownAccountId} playerName={ownAccountId == null ? null : playerProfiles[ownAccountId]?.name} heroNames={heroNameMap} itemNames={itemNameMap} itemCategories={itemCategoryMap} heroImages={heroImageMap} itemImages={itemImageMap} initialReview={desktopTab === "review"} />}
+      {desktopStatus && desktopTab === "system" && <section className="desktop-system-page" aria-label="Settings"><div className="desktop-system-heading"><small>COUNTERLOCK / PREFERENCES</small><h1>Settings</h1><p>Manage your desktop experience and check the local game connection.</p></div><div className="desktop-system-grid">
         <article><h2>Game connection</h2><dl><div><dt>Deadlock</dt><dd>{desktopStatus.game_running ? "Running" : "Not running"}</dd></div><div><dt>Process ID</dt><dd>{desktopStatus.pid ?? "—"}</dd></div><div><dt>Steam build</dt><dd>{desktopStatus.build_id ?? "Unknown"}</dd></div><div><dt>Live source</dt><dd>{desktopStatus.provider}</dd></div><div><dt>Console phase</dt><dd>{desktopStatus.console_phase ?? "No verified event"}</dd></div><div><dt>Match ID</dt><dd>{desktopStatus.match_id ?? "Unavailable"}</dd></div><div><dt>Inventory</dt><dd>{desktopStatus.capabilities.items ? "Available" : "Not available"}</dd></div><div><dt>Install path</dt><dd>{desktopStatus.installation_path ?? "Not detected"}</dd></div></dl>{desktopStatus.last_error && <p className="desktop-system-error">{desktopStatus.last_error}</p>}{desktopLastMatch && <p className="desktop-system-note">Last match: {desktopLastMatch.match_id ?? "ID unknown"} · {desktopLastMatch.source}</p>}</article>
         <article><h2>Desktop settings</h2><label><input type="checkbox" checked={desktopPreferences?.close_to_tray ?? true} onChange={(event) => void updateDesktopPreferences({ close_to_tray: event.target.checked })} />{lang === "de" ? "Beim Schließen im Tray weiterlaufen" : "Keep running in tray when closing"}</label><label><input type="checkbox" checked={desktopPreferences?.compact_always_on_top ?? true} onChange={(event) => void updateDesktopPreferences({ compact_always_on_top: event.target.checked })} />{lang === "de" ? "Kompaktfenster immer im Vordergrund" : "Keep compact window always on top"}</label><p>Game memory is read locally. Screenshots and unspent shop balance are separate capabilities.</p><hr /><h2>{lang === "de" ? "Software-Updates" : "Software updates"}</h2><button type="button" disabled={updateBusy} onClick={() => void checkDesktopUpdates()}>{updateBusy ? (lang === "de" ? "BITTE WARTEN …" : "PLEASE WAIT…") : (lang === "de" ? "NACH UPDATES SUCHEN" : "CHECK FOR UPDATES")}</button>{updateStatus && <p role="status">{updateStatus}</p>}</article>
       </div></section>}

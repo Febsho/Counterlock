@@ -80,7 +80,10 @@ fn populate_url(match_id: u64, account_id: Option<u32>) -> String {
     }
 }
 
-fn retry_delay(attempts: u32) -> i64 {
+fn retry_delay(attempts: u32, waiting_for_replay_cache: bool) -> i64 {
+    if waiting_for_replay_cache {
+        return 1_i64.saturating_mul(1_i64 << attempts.min(4)).min(10);
+    }
     15_i64.saturating_mul(1_i64 << attempts.min(6)).min(900)
 }
 
@@ -210,7 +213,9 @@ pub fn run(app: AppHandle, wake: mpsc::Receiver<()>) {
             }
         };
         let Some(pending) = pending else {
-            match wake.recv_timeout(Duration::from_secs(20)) {
+            let retry_wait = app.state::<Storage>().next_statlocker_retry_at()
+                .ok().flatten().map(|at| at.saturating_sub(unix_now()).max(1) as u64).unwrap_or(20);
+            match wake.recv_timeout(Duration::from_secs(retry_wait.min(20))) {
                 Ok(()) | Err(mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
             }
@@ -231,7 +236,9 @@ pub fn run(app: AppHandle, wake: mpsc::Receiver<()>) {
                 }
             }
             Err(error) => {
-                let next_attempt_at = unix_now() + retry_delay(pending.attempts);
+                let waiting_for_replay_cache = error.starts_with("Steam replay cache has no metadata or replay salt");
+                let delay = retry_delay(pending.attempts, waiting_for_replay_cache);
+                let next_attempt_at = unix_now() + delay;
                 if let Err(storage_error) = app.state::<Storage>().retry_statlocker_match(
                     pending.match_id,
                     next_attempt_at,
@@ -239,7 +246,7 @@ pub fn run(app: AppHandle, wake: mpsc::Receiver<()>) {
                 ) {
                     tracing::warn!(%storage_error, match_id = pending.match_id, "scheduling Statlocker notification retry failed");
                 }
-                tracing::warn!(%error, match_id = pending.match_id, retry_at = next_attempt_at, "match ingestion retry scheduled");
+                tracing::warn!(%error, match_id = pending.match_id, retry_at = next_attempt_at, retry_in_seconds = delay, "match ingestion retry scheduled");
             }
         }
     }

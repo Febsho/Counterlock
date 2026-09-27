@@ -5,6 +5,7 @@ export type PendingMatchRecord = { heroId: number; recommendations: Recommendati
 export type ActualPurchase = { itemId: number; gameTime: number };
 export type RecommendationOutcome = {
   matchId: number; heroId: number; recommendations: RecommendationSnapshot[]; actualPurchases: ActualPurchase[];
+  purchaseHistoryAvailable?: boolean;
   result: "win" | "loss"; durationSeconds: number | null; date: number | null; netWorth: number | null; matchMode: string | null; rankSnapshot: MatchRankSnapshot | null;
   performance: { kills: number | null; deaths: number | null; assists: number | null; spm: number | null; kda: number | null; damagePerMinute: number | null; killParticipation: number | null; mvpScore: number | null };
 };
@@ -74,6 +75,7 @@ export function completeRecommendationOutcome(accountId: number, payload: unknow
     matchId: matchId as number, heroId: player.hero_id as number,
     recommendations: pending?.heroId === player.hero_id ? pending.recommendations : previousOutcome?.recommendations ?? [],
     actualPurchases: [...new Map([...previousOutcome?.actualPurchases ?? [], ...actualPurchases].map(item=>[`${item.itemId}:${item.gameTime}`,item])).values()].sort((a,b)=>a.gameTime-b.gameTime),
+    purchaseHistoryAvailable: Array.isArray(player.items) || previousOutcome?.purchaseHistoryAvailable === true,
     result: player.playerWon ? "win" : "loss", durationSeconds: durationSeconds ?? previousOutcome?.durationSeconds,
     date: number(match.start_time ?? match.startTime) ?? previousOutcome?.date, netWorth: number(player.net_worth ?? metrics.netWorth) ?? previousOutcome?.netWorth,
     matchMode: typeof (match.match_mode_parsed ?? match.matchMode) === "string" ? String(match.match_mode_parsed ?? match.matchMode) : pending?.matchMode ?? previousOutcome?.matchMode ?? null,

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.8
+
+- Enriched live player profiles with Deadlock API Steam names, avatars, and
+  official rank badges, while retaining Statlocker profile points when available.
+- Added Deadlock API match history with verified results, K/D/A, duration, and
+  net worth when local match records are missing.
+- Added community build item popularity and common ability orders to Build Lab
+  as supporting context; build popularity is not presented as win-rate evidence.
+- Clarified when public match history lacks purchase timelines; locally captured
+  and Statlocker purchase data remain available where present.
+
 ## 0.1.7
 
 - Improved next-buy ranking with confidence-weighted item performance for the
