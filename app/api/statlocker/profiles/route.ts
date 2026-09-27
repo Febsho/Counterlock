@@ -1,6 +1,6 @@
 export const runtime = "edge";
 
-const STEAM_ID64_BASE = 76561197960265728n;
+const STEAM_ID64_BASE = BigInt("76561197960265728");
 
 async function steamProfile(accountId: number) {
   try {
@@ -64,10 +64,10 @@ export async function POST(request: Request) {
       };
       const rank = profile.estimatedRankNumber;
       return [{
-        accountId: profile.accountId,
+        accountId: profile.accountId as number,
         name: safeText(profile.name, 80),
         avatarUrl: safeUrl(profile.avatarUrl),
-        ppScore: Number.isFinite(profile.ppScore) ? profile.ppScore : null,
+        ppScore: Number.isFinite(profile.ppScore) ? profile.ppScore as number : null,
         estimatedRankNumber: Number.isInteger(rank) && (rank as number) >= 11 && (rank as number) <= 116 && (rank as number) % 10 >= 1 && (rank as number) % 10 <= 6 ? rank : null,
         region: safeText(profile.region, 24),
       }];
@@ -82,7 +82,7 @@ export async function POST(request: Request) {
         if (!profile.avatarUrl && steam?.avatarUrl) profile.avatarUrl = steam.avatarUrl;
       }
       for (const steam of steamProfiles) if (steam.name && !profiles.some((profile) => profile.accountId === steam.accountId)) {
-        profiles.push({ accountId: steam.accountId, name: steam.name, avatarUrl: steam.avatarUrl, ppScore: null, estimatedRankNumber: null, region: null });
+        profiles.push({ accountId: steam.accountId, name: steam.name, avatarUrl: steam.avatarUrl ?? null, ppScore: null, estimatedRankNumber: null, region: null });
       }
     }
     return Response.json({ status: "connected", profiles }, { headers: { "Cache-Control": "private, max-age=900" } });

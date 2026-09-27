@@ -796,7 +796,7 @@ export default function Home() {
         cachedJson<unknown>(`${API}/analytics/ability-order-stats?${abilityOrderParams}`, 60 * 60 * 1000),
       ]);
       if (runId !== analysisRunRef.current) return;
-      setItemFlow(flowResult[0].status === "fulfilled" ? flowResult[0].value : null);
+      setItemFlow(flowResult.status === "fulfilled" ? flowResult.value : null);
       const buildRows = buildStatsResult.status === "fulfilled" && Array.isArray(buildStatsResult.value) ? buildStatsResult.value : [];
       setCommunityBuildItems(buildRows.flatMap((raw) => {
         if (!raw || typeof raw !== "object") return [];
@@ -810,7 +810,7 @@ export default function Home() {
         return Array.isArray(row.abilities) && row.abilities.every((id) => Number.isInteger(id)) && Number.isFinite(row.wins) && Number.isFinite(row.losses) && Number.isFinite(row.matches)
           ? [{ abilities: row.abilities as number[], wins: row.wins as number, losses: row.losses as number, matches: row.matches as number }] : [];
       }).sort((a, b) => b.matches - a.matches));
-      if (flowResult[0].status === "rejected") console.warn("Optional Deadlock item-flow data unavailable; continuing with item and matchup statistics.", flowResult[0].reason);
+      if (flowResult.status === "rejected") console.warn("Optional Deadlock item-flow data unavailable; continuing with item and matchup statistics.", flowResult.reason);
       if (runId !== analysisRunRef.current) return;
       const abilityHeroIds = [...new Set([heroId, ...enemyIds])];
       const abilityResults = await Promise.allSettled(abilityHeroIds.map((abilityHeroId) => cachedJson<HeroAbilityEvidence[]>(`${API}/assets/items/by-hero-id/${abilityHeroId}?language=english`, 24 * 60 * 60 * 1000)));
@@ -872,7 +872,7 @@ export default function Home() {
         return [entry.item.id,coverage] as const;
       }));
       const ranked = rankItems(calculated.map((entry) => {
-        const flow = flowResult[0].status === "fulfilled" ? flowResult[0].value : null;
+        const flow = flowResult.status === "fulfilled" ? flowResult.value : null;
         const core = flowCoreFit(flow, entry.item.id, itemFlowPhase(effectiveGameTimeSeconds));
         const itemThreats = { ...threats, healing: threats.healing || lifestealDetected };
         const mechanicFit = Math.max(counterCapability(entry.item.class_name, weightedThreatProfile), tagMatchesManualThreat(entry.item.class_name, itemThreats) ? 0.72 : 0,coverageByItem.get(entry.item.id)?.weightedThreatCoverage??0);
@@ -892,7 +892,7 @@ export default function Home() {
       const rankedById = new Map(ranked.map((entry) => [entry.itemId, entry]));
       const carryThreats = threatInputs.filter((enemy) => enemy.heroId === carryId);
       const carryRanked = rankItems(calculated.map((entry) => {
-        const core = flowCoreFit(flowResult[0].status === "fulfilled" ? flowResult[0].value : null, entry.item.id, itemFlowPhase(effectiveGameTimeSeconds));
+        const core = flowCoreFit(flowResult.status === "fulfilled" ? flowResult.value : null, entry.item.id, itemFlowPhase(effectiveGameTimeSeconds));
         return { itemId: entry.item.id, baselineRate: entry.baselineRate, coreRate: core?.rate ?? null, coreMatches: core?.matches ?? 0,
           exactRate: null, exactMatches: 0, averageBuyTimeSeconds: entry.carryBuyTime || null,
           mechanicFit: Math.max(counterCapability(entry.item.class_name, enemyThreatProfiles.get(carryId) ?? {}), tagMatchesManualThreat(entry.item.class_name, { ...threats, healing: threats.healing || lifestealDetected }) ? 0.72 : 0),

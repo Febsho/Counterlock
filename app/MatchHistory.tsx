@@ -95,3 +95,5 @@ function statlockerOutcome(value: unknown, accountId: number): RecommendationOut
   const date = match.startTime ?? match.start_time ?? match.matchTime ?? match.match_time;
   return { matchId: id as number, heroId: heroId as number, result: wonValue ? "win" : "loss", recommendations: [], actualPurchases: purchases, purchaseHistoryAvailable: Array.isArray(player?.items), durationSeconds: typeof duration === "number" ? duration : null, date: typeof date === "number" ? date : null, netWorth: n("netWorth", "net_worth"), matchMode: typeof (match.match_mode_parsed ?? match.matchMode) === "string" ? String(match.match_mode_parsed ?? match.matchMode) : null, rankSnapshot: null, performance: { kills: n("kills", "killCount"), deaths: n("deaths", "deathCount"), assists: n("assists", "assistCount"), spm: n("soulsPerMinute", "spm"), kda: n("kdaRatio", "kda"), damagePerMinute: n("damagePerMinute"), killParticipation: n("killParticipation"), mvpScore: n("mvpScore") } };
 }
+
+function finite(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) ? value : null; }
