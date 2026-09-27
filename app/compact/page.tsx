@@ -8,6 +8,7 @@ import { playerRank } from "../lib/player-rank";
 import { scoreThreats } from "../lib/build-engine/threat-score";
 
 type Hero = { id: number; name: string; images?: { icon_image_small_webp?: string } };
+type Item = { id: number; shop_image_webp?: string };
 
 export default function CompactView() {
   const [status, setStatus] = useState<DesktopStatus | null>(null);
@@ -15,10 +16,11 @@ export default function CompactView() {
   const [advice, setAdvice] = useState<DesktopAdvice | null>(null);
   const [profiles, setProfiles] = useState<Record<number, StatlockerProfile>>({});
   const [heroes, setHeroes] = useState<Map<number, Hero>>(new Map());
+  const [items, setItems] = useState<Map<number, Item>>(new Map());
   const rosterKey = match?.players.map((entry) => entry.account_id).filter((id): id is number => id != null).sort((a, b) => a - b).filter((id, index, ids) => index === 0 || id !== ids[index - 1]).join(",") ?? "";
   useEffect(() => {
     let active = true;
-    void fetch("https://api.deadlock-api.com/v1/assets/heroes?only_active=true").then((response) => response.json()).then((rows: Hero[]) => { if (active && Array.isArray(rows)) setHeroes(new Map(rows.map((hero) => [hero.id, hero]))); }).catch(() => {});
+    void Promise.all([fetch("https://api.deadlock-api.com/v1/assets/heroes?only_active=true").then((response) => response.json()), fetch("https://api.deadlock-api.com/v1/assets/items?language=english").then((response) => response.json())]).then(([heroRows, itemRows]: [Hero[], Item[]]) => { if (!active) return; if (Array.isArray(heroRows)) setHeroes(new Map(heroRows.map((hero) => [hero.id, hero]))); if (Array.isArray(itemRows)) setItems(new Map(itemRows.map((item) => [item.id, item]))); }).catch(() => {});
     return () => { active = false; };
   }, []);
   useEffect(() => {
@@ -50,9 +52,7 @@ export default function CompactView() {
     <header><strong><i>CL</i> COUNTERLOCK</strong><span>{status?.in_game ? "● LIVE MATCH" : status?.game_running ? "● DEADLOCK" : "○ IDLE"}</span></header>
     <div className="compact-body">
       <section className="compact-identity"><span className="compact-avatar">{identity?.avatarUrl ? <img src={identity.avatarUrl} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}</span><div><small>YOU · {identity?.name || (player?.account_id == null ? "Player" : "Loading profile")}</small><strong>{heroName}</strong><span className="compact-rank" title={rank ? "Estimated rank · Statlocker" : "Rank unavailable"}>{rank && <img src={rank.badgeUrl} alt="" />}{rank?.label ?? "Rank —"}</span></div><b>{match?.game_time_s == null ? "—" : `${Math.floor(match.game_time_s / 60)}:${String(match.game_time_s % 60).padStart(2, "0")}`}</b></section>
-      <section className="compact-next"><header><small>NEXT BUY</small><span>◈ {player?.unspent_souls?.toLocaleString() ?? "—"} SOULS</span></header><strong>{advice?.recommended?.name ?? "Awaiting verified recommendation"}</strong>{advice?.recommended && <><span>{advice.recommended.cost.toLocaleString()} · {advice.recommended.affordable == null ? "Affordability unknown" : advice.recommended.affordable ? "BUY NOW" : "SAVE SOULS"}</span><p>{advice.recommended.reason}</p></>}</section>
-      <section className="compact-threat"><small>TOP THREAT</small>{primaryThreat ? <><div><span>{profiles[primaryThreat.account_id ?? -1]?.avatarUrl ? <img src={profiles[primaryThreat.account_id ?? -1].avatarUrl!} alt="" /> : null}</span><strong>{profiles[primaryThreat.account_id ?? -1]?.name || "Player"}<small>{heroes.get(primaryThreat.hero_id!)?.name ?? `Hero #${primaryThreat.hero_id}`} · {playerRank(profiles[primaryThreat.account_id ?? -1]?.estimatedRankNumber)?.label ?? "Rank —"}</small></strong><b>{(threats[0].weight * 100).toFixed(0)}%</b></div><p>{primaryThreat.net_worth?.toLocaleString() ?? "—"} NW · {primaryThreat.kills ?? "—"}/{primaryThreat.deaths ?? "—"}/{primaryThreat.assists ?? "—"} KDA</p></> : <p>Enemy roster unavailable</p>}</section>
-      <footer><span>{match?.source ?? status?.provider ?? "No telemetry"}</span><b>{player?.net_worth?.toLocaleString() ?? "—"} NW</b></footer>
+      <section className="compact-next"><header><small>NEXT BUY</small><span>◈ {player?.unspent_souls?.toLocaleString() ?? "—"} SOULS</span></header><div className="compact-buy-row"><span className="compact-item-icon">{advice?.recommended && items.get(advice.recommended.item_id)?.shop_image_webp ? <img src={items.get(advice.recommended.item_id)?.shop_image_webp} alt="" /> : "◆"}</span><strong>{advice?.recommended?.name ?? "Awaiting verified recommendation"}</strong></div>{advice?.recommended && <><span>{advice.recommended.cost.toLocaleString()} · {advice.recommended.affordable == null ? "SOULS UNKNOWN" : advice.recommended.affordable ? "BUY NOW" : "SAVE SOULS"}</span>{primaryThreat && <p className="compact-vs">VS {profiles[primaryThreat.account_id ?? -1]?.name || "Player"} · {heroes.get(primaryThreat.hero_id!)?.name ?? `Hero #${primaryThreat.hero_id}`}</p>}</>}</section>
     </div>
   </main>;
 }

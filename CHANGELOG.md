@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.6
+
+- Reorganized the live Build Lab around the next purchase, then current inventory,
+  adaptive choices, and the compact purchase path.
+- Added clear affordability from live unspent souls, concise recommendation
+  reasons, confidence details on demand, and normal-core versus adaptive-buy context.
+- Added enemy threat selection to highlight relevant counters, plus clearer owned,
+  counter, situational, and current-stage states in the purchase path.
+- Reduced compact mode to the next item, cost, affordability, souls, and threat target.
+- Added responsive sidebar collapse, keyboard focus states, reduced-motion support,
+  and presentation tests for affordability and match stages.
+
 ## 0.1.5
 
 - Added match history with completed match summaries and player performance context.
